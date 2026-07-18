@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alphaduel"
+version = "0.0.1"
+description = "A controlled duel between reasoning LLM agents and pure quant models for portfolio allocation."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Aurel Steve Avomo", email = "avomoa@gmail.com" }]
+keywords = ["reinforcement-learning", "llm", "finance", "portfolio", "gymnasium", "quant"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Science/Research",
+]
+dependencies = [
+  "numpy>=1.26",
+  "gymnasium>=0.29",
+  "pydantic>=2.6",
+  "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/aurelSteve77/alphaduel"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alphaduel"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

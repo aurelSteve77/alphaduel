@@ -1,0 +1,20 @@
+# Default configuration for the alphaduel study.
+# Every branch (LLM + quant) reads this same file to guarantee parity.
+
+seed: 42
+
+data:
+  tickers: [AAPL, MSFT, JNJ, JPM, XOM, PG, KO, WMT, HD, CVX]
+  start: "2015-01-01"
+  end: "2024-12-31"
+  train_end: "2021-12-31"
+  val_end: "2022-12-31"
+
+env:
+  budget: 100000.0
+  cost_bps: 5.0          # round-trip transaction cost on turnover (basis points)
+  max_weight: 0.30       # long-only cap per asset
+  allow_short: false
+  rebalance_every: 1     # Δ: trading days per decision (1 = daily)
+  obs_window: 21         # past-returns window exposed in the observation
+  horizon: 252           # episode length in steps
