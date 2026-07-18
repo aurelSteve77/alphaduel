@@ -7,12 +7,13 @@ name = "alphaduel"
 version = "0.0.1"
 description = "A controlled duel between reasoning LLM agents and pure quant models for portfolio allocation."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 license = { text = "MIT" }
 authors = [{ name = "Aurel Steve Avomo", email = "avomoa@gmail.com" }]
 keywords = ["reinforcement-learning", "llm", "finance", "portfolio", "gymnasium", "quant"]
 classifiers = [
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
   "License :: OSI Approved :: MIT License",
   "Intended Audience :: Science/Research",
 ]
@@ -32,9 +33,12 @@ Homepage = "https://github.com/aurelSteve77/alphaduel"
 [tool.hatch.build.targets.wheel]
 packages = ["src/alphaduel"]
 
+[tool.uv]
+package = true
+
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

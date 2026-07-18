@@ -27,11 +27,14 @@
 
 ## Install
 
+This project uses **[uv](https://docs.astral.sh/uv/)** and **Python 3.13**.
+
 ```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate   |   macOS/Linux: source .venv/bin/activate
-pip install -e ".[dev]"
+# uv provisions Python 3.13 and installs the project + dev deps into .venv
+uv sync --extra dev
 ```
+
+Run any command inside the environment with `uv run`, e.g. `uv run pytest`.
 
 ## Quickstart
 
@@ -65,14 +68,14 @@ env = gym.make("AlphaDuel-v0")
 Run the tests:
 
 ```bash
-pytest
+uv run pytest
 ```
 
 ## Project layout
 
 ```
 alphaduel/
-├── pyproject.toml           # packaging + tooling (hatchling, ruff, pytest)
+├── pyproject.toml           # packaging + tooling (uv, hatchling, ruff, pytest)
 ├── configs/
 │   └── default.yaml         # single source of truth: universe, budget, costs, cadence
 ├── src/alphaduel/

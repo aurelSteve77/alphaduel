@@ -1,13 +1,13 @@
 .PHONY: install test lint format
 
 install:
-	pip install -e ".[dev]"
+	uv sync --extra dev
 
 test:
-	pytest
+	uv run pytest
 
 lint:
-	ruff check src tests
+	uv run ruff check src tests
 
 format:
-	ruff format src tests
+	uv run ruff format src tests
