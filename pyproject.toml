@@ -19,13 +19,19 @@ classifiers = [
 ]
 dependencies = [
   "numpy>=1.26",
+  "pandas>=2.2",
   "gymnasium>=0.29",
   "pydantic>=2.6",
   "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
+# Live market-data fetchers (kept optional so the core stays light and offline-friendly).
+data = ["yfinance>=0.2.40", "pandas-datareader>=0.10", "pyarrow>=15.0"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
+
+[project.scripts]
+alphaduel-baselines = "alphaduel.cli:baselines_main"
 
 [project.urls]
 Homepage = "https://github.com/aurelSteve77/alphaduel"

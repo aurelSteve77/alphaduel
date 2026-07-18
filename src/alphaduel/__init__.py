@@ -7,6 +7,7 @@ train and are evaluated against *this same* environment to guarantee parity.
 """
 
 from .config import Config, load_config
+from .data import MarketData
 from .env import AlphaDuelEnv, PortfolioSimulator
 
 __version__ = "0.0.1"
@@ -14,6 +15,7 @@ __version__ = "0.0.1"
 __all__ = [
     "Config",
     "load_config",
+    "MarketData",
     "AlphaDuelEnv",
     "PortfolioSimulator",
     "__version__",

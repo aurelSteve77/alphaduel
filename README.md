@@ -11,7 +11,9 @@
 > The deliverable is an honest **study**, not a promise of alpha. Negative
 > results are first-class.
 
-> **Status:** 🚧 Work in progress — building the shared environment (milestone **M1**).
+> **Status:** 🚧 Work in progress — **M1 (shared substrate)** landed: data pipeline,
+> point-in-time features, no-lookahead splits, rule-based baselines and a
+> walk-forward eval harness. Next: the quant branch (M2).
 
 ## Why this design
 
@@ -65,6 +67,30 @@ import alphaduel  # noqa: F401  (registers the env id)
 env = gym.make("AlphaDuel-v0")
 ```
 
+### Real data + baselines
+
+With the `data` extra installed (`uv sync --extra data`), run the rule-based
+baselines out-of-sample and print a metrics table (falls back to synthetic data
+if no network is available):
+
+```bash
+uv run alphaduel-baselines            # live data (yfinance -> Stooq)
+uv run alphaduel-baselines --synthetic
+```
+
+Programmatic use of the shared substrate:
+
+```python
+from alphaduel import MarketData
+from alphaduel.baselines import EqualWeight, Momentum
+from alphaduel.eval import run_backtest, walk_forward
+
+market = MarketData.from_synthetic(n_days=2600, n_assets=10)
+test_lo, test_hi = market.split_indices("2021-12-31", "2022-12-31")["test"]
+res = run_backtest(Momentum(), market, test_lo, test_hi)
+print(res.metrics)
+```
+
 Run the tests:
 
 ```bash
@@ -80,17 +106,24 @@ alphaduel/
 │   └── default.yaml         # single source of truth: universe, budget, costs, cadence
 ├── src/alphaduel/
 │   ├── config.py            # typed config (pydantic) + YAML loader
+│   ├── cli.py               # `alphaduel-baselines` entry point
 │   ├── env/
 │   │   ├── portfolio.py     # framework-agnostic simulator (reset/step, costs, constraints)
-│   │   └── gym_env.py       # Gymnasium wrapper (obs/action spaces)
-│   ├── data/                # M1: download, features (<= t), verbalize, labels, splits
+│   │   └── gym_env.py       # Gymnasium wrapper (feature + synthetic modes)
+│   ├── data/
+│   │   ├── download.py      # yfinance -> Stooq, parquet cache
+│   │   ├── features.py      # point-in-time features (<= t, cross-sectional z-score)
+│   │   ├── splits.py        # chronological splits + no-lookahead asserts
+│   │   └── dataset.py       # MarketData container (prices + features + splits)
+│   ├── baselines/           # equal-weight, buy & hold, momentum
+│   ├── eval/                # metrics, backtest, walk-forward
 │   └── utils/prices.py      # synthetic GBM prices for dev/tests
 └── tests/
 ```
 
 ## Roadmap
 
-- **M1 — Shared substrate** ✅ env (this) → data pipeline, features, no-lookahead asserts, baselines, walk-forward eval harness.
+- **M1 — Shared substrate** ✅ env, data pipeline, point-in-time features, no-lookahead splits, baselines, walk-forward eval harness.
 - **M2 — Quant branch (B):** supervised predict-then-optimize, deep-portfolio (direct Sharpe), deep-RL (PPO/SAC).
 - **M3 — LLM branch (A):** verbalized state, optional SFT, GRPO (Qwen 1.5B → 3B); include a zero-shot baseline.
 - **M4 — Comparison v1:** A vs B on the same protocol; the marquee figure.

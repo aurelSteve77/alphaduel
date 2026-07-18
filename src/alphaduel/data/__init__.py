@@ -1,13 +1,10 @@
-"""Data pipeline (to be implemented in milestone M1).
-
-Planned modules:
-- ``download``  : fetch OHLCV (yfinance primary, Stooq fallback) + SPY + VIX.
-- ``features``  : numeric features computed strictly <= t, cross-sectional z-score.
-- ``verbalize`` : deterministic text rendering of a state for the LLM branch.
-- ``labels``    : shifted forward returns for the supervised quant baseline.
-- ``splits``    : chronological train/val/test with no-lookahead assertions.
-"""
+"""Data pipeline: download, point-in-time features, splits, and the shared
+``MarketData`` container."""
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from .dataset import MarketData
+from .features import compute_features
+from .splits import split_indices
+
+__all__ = ["MarketData", "compute_features", "split_indices"]
