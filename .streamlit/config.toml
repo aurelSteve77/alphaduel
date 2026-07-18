@@ -1,0 +1,24 @@
+# Anthropic-inspired warm light theme.
+# Adapted from github.com/jrieke/advanced-theming-examples (anthropic).
+# The original uses the proprietary "Styrene B" trial font; we substitute the
+# free geometric font "Manrope" (loaded from Google Fonts) to stay licensable.
+
+[theme]
+primaryColor = "#bb5a38"
+backgroundColor = "#f4f3ed"
+secondaryBackgroundColor = "#ecebe3"
+textColor = "#3d3a2a"
+linkColor = "#3d3a2a"
+borderColor = "#d3d2ca"
+showWidgetBorder = true
+baseRadius = "0.6rem"
+font = "Manrope:https://fonts.googleapis.com/css2?family=Manrope:wght@300..800&display=swap"
+codeFont = "Fira Code:https://fonts.googleapis.com/css2?family=Fira+Code:wght@300..700&display=swap"
+codeBackgroundColor = "#ecebe4"
+showSidebarBorder = true
+headingFontSizes = ["40px", "32px", "24px"]
+headingFontWeights = 500
+
+[theme.sidebar]
+backgroundColor = "#e8e7dd"
+secondaryBackgroundColor = "#ecebe3"

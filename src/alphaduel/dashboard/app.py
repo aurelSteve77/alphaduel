@@ -100,19 +100,22 @@ def main() -> None:
     )
 
     left, right = st.columns(2)
-    left.plotly_chart(service.equity_figure(market, results), width="stretch")
-    right.plotly_chart(service.drawdown_figure(market, results), width="stretch")
+    left.plotly_chart(service.equity_figure(market, results), width="stretch", theme=None)
+    right.plotly_chart(service.drawdown_figure(market, results), width="stretch", theme=None)
 
     left2, right2 = st.columns(2)
     left2.plotly_chart(
         service.rolling_sharpe_figure(market, results, periods_per_year=ppy),
         width="stretch",
+        theme=None,
     )
-    right2.plotly_chart(service.returns_hist_figure(results), width="stretch")
+    right2.plotly_chart(service.returns_hist_figure(results), width="stretch", theme=None)
 
     st.subheader("Allocation over time")
     choice = st.selectbox("Strategy", list(results.keys()))
-    st.plotly_chart(service.allocation_figure(market, results[choice]), width="stretch")
+    st.plotly_chart(
+        service.allocation_figure(market, results[choice]), width="stretch", theme=None
+    )
 
 
 main()

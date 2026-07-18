@@ -16,10 +16,14 @@ from ..baselines.policies import build_policy
 from ..data.dataset import MarketData
 from ..eval.backtest import BacktestResult, run_backtest
 
+# Warm palette that harmonizes with the Anthropic cream/terracotta theme.
 _PALETTE = [
-    "#2dd4bf", "#f59e0b", "#60a5fa", "#f472b6", "#a3e635",
-    "#c084fc", "#fb7185", "#34d399", "#facc15", "#38bdf8",
+    "#bb5a38", "#3d3a2a", "#c99a2e", "#4a6fa5", "#6b8e6b",
+    "#a34a3f", "#8a6d3b", "#7a5c7a", "#4c8c8c", "#b07d4a",
 ]
+_CASH_COLOR = "#b8b5a8"
+_TEXT = "#3d3a2a"
+_GRID = "rgba(61, 58, 42, 0.12)"
 
 _METRIC_LABELS = {
     "total_return": "Total Return",
@@ -109,6 +113,21 @@ def _color(i: int) -> str:
     return _PALETTE[i % len(_PALETTE)]
 
 
+def _finalize(fig: go.Figure) -> go.Figure:
+    """Apply the shared warm/light look with transparent backgrounds so the
+    charts blend into the Anthropic cream theme (rendered with ``theme=None``)."""
+    fig.update_layout(
+        paper_bgcolor="rgba(0, 0, 0, 0)",
+        plot_bgcolor="rgba(0, 0, 0, 0)",
+        font=dict(color=_TEXT),
+        legend=dict(bgcolor="rgba(0, 0, 0, 0)"),
+        margin=dict(l=50, r=20, t=50, b=40),
+    )
+    fig.update_xaxes(gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID)
+    fig.update_yaxes(gridcolor=_GRID, zerolinecolor=_GRID, linecolor=_GRID)
+    return fig
+
+
 def equity_figure(market: MarketData, results: dict[str, BacktestResult]) -> go.Figure:
     fig = go.Figure()
     for i, (name, res) in enumerate(results.items()):
@@ -125,10 +144,9 @@ def equity_figure(market: MarketData, results: dict[str, BacktestResult]) -> go.
         title="Portfolio value (out-of-sample)",
         xaxis_title="Date",
         yaxis_title="Value",
-        template="plotly_dark",
         hovermode="x unified",
     )
-    return fig
+    return _finalize(fig)
 
 
 def drawdown_figure(market: MarketData, results: dict[str, BacktestResult]) -> go.Figure:
@@ -151,10 +169,9 @@ def drawdown_figure(market: MarketData, results: dict[str, BacktestResult]) -> g
         xaxis_title="Date",
         yaxis_title="Drawdown",
         yaxis_tickformat=".0%",
-        template="plotly_dark",
         hovermode="x unified",
     )
-    return fig
+    return _finalize(fig)
 
 
 def allocation_figure(market: MarketData, res: BacktestResult) -> go.Figure:
@@ -179,7 +196,7 @@ def allocation_figure(market: MarketData, res: BacktestResult) -> go.Figure:
     fig.add_trace(
         go.Scatter(
             x=dates, y=cash, name="cash", mode="lines",
-            stackgroup="alloc", line=dict(width=0.5, color="#64748b"),
+            stackgroup="alloc", line=dict(width=0.5, color=_CASH_COLOR),
         )
     )
     fig.update_layout(
@@ -187,10 +204,9 @@ def allocation_figure(market: MarketData, res: BacktestResult) -> go.Figure:
         xaxis_title="Date",
         yaxis_title="Weight",
         yaxis_range=[0, 1],
-        template="plotly_dark",
         hovermode="x unified",
     )
-    return fig
+    return _finalize(fig)
 
 
 def rolling_sharpe_figure(
@@ -221,10 +237,9 @@ def rolling_sharpe_figure(
         title=f"Rolling Sharpe ({window}-step)",
         xaxis_title="Date",
         yaxis_title="Sharpe",
-        template="plotly_dark",
         hovermode="x unified",
     )
-    return fig
+    return _finalize(fig)
 
 
 def returns_hist_figure(results: dict[str, BacktestResult]) -> go.Figure:
@@ -244,6 +259,5 @@ def returns_hist_figure(results: dict[str, BacktestResult]) -> go.Figure:
         xaxis_title="Step return",
         yaxis_title="Count",
         barmode="overlay",
-        template="plotly_dark",
     )
-    return fig
+    return _finalize(fig)
