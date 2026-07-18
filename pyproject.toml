@@ -28,10 +28,13 @@ dependencies = [
 [project.optional-dependencies]
 # Live market-data fetchers (kept optional so the core stays light and offline-friendly).
 data = ["yfinance>=0.2.40", "pandas-datareader>=0.10", "pyarrow>=15.0"]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+# Interactive dashboard.
+app = ["streamlit>=1.36", "plotly>=5.22"]
+dev = ["pytest>=8.0", "ruff>=0.5", "plotly>=5.22"]
 
 [project.scripts]
 alphaduel-baselines = "alphaduel.cli:baselines_main"
+alphaduel-dashboard = "alphaduel.dashboard.launch:main"
 
 [project.urls]
 Homepage = "https://github.com/aurelSteve77/alphaduel"

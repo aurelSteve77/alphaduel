@@ -21,8 +21,11 @@ from .metrics import compute_metrics
 class BacktestResult:
     name: str
     step_returns: np.ndarray
-    equity_curve: np.ndarray
+    equity_curve: np.ndarray  # [n_steps + 1], starts at budget
     turnovers: np.ndarray
+    weights: np.ndarray  # [n_steps, K] target weights applied each step
+    decision_index: np.ndarray  # [n_steps] time index at each decision
+    value_index: np.ndarray  # [n_steps] time index the value is realized at
     metrics: dict
 
 
@@ -51,14 +54,21 @@ def run_backtest(
     returns: list[float] = []
     equity: list[float] = [budget]
     turnovers: list[float] = []
+    weights: list[np.ndarray] = []
+    decision_index: list[int] = []
+    value_index: list[int] = []
 
     while sim._t < end_idx - 1:
-        target = np.asarray(policy.act(market, sim._t, sim.state()), dtype=float)
+        t0 = sim._t
+        target = np.asarray(policy.act(market, t0, sim.state()), dtype=float)
         delta = target - sim.weights
         result = sim.step(delta)
         returns.append(result.reward)
         equity.append(result.portfolio_value)
         turnovers.append(result.turnover)
+        weights.append(sim.weights.copy())
+        decision_index.append(t0)
+        value_index.append(sim._t)
         if result.terminated:
             break
 
@@ -70,6 +80,9 @@ def run_backtest(
         step_returns=np.asarray(returns),
         equity_curve=np.asarray(equity),
         turnovers=np.asarray(turnovers),
+        weights=np.asarray(weights) if weights else np.empty((0, market.n_assets)),
+        decision_index=np.asarray(decision_index, dtype=int),
+        value_index=np.asarray(value_index, dtype=int),
         metrics=metrics,
     )
 

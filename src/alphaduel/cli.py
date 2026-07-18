@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import argparse
 
-from .baselines.policies import BuyAndHold, EqualWeight, Momentum
+from .baselines.policies import default_policies
 from .config import Config, load_config
 from .data.dataset import MarketData
 from .eval.backtest import run_backtest
@@ -64,11 +64,7 @@ def baselines_main(argv: list[str] | None = None) -> None:
         f"{market.dates[hi - 1].date()} ({hi - lo} steps, {market.n_assets} assets)\n"
     )
 
-    policies = [
-        EqualWeight(cfg.env.max_weight),
-        BuyAndHold(cfg.env.max_weight),
-        Momentum(max_weight=cfg.env.max_weight),
-    ]
+    policies = default_policies(cfg.env.max_weight)
     rows = []
     for policy in policies:
         res = run_backtest(

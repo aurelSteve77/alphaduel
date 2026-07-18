@@ -69,13 +69,28 @@ env = gym.make("AlphaDuel-v0")
 
 ### Real data + baselines
 
-With the `data` extra installed (`uv sync --extra data`), run the rule-based
-baselines out-of-sample and print a metrics table (falls back to synthetic data
-if no network is available):
+Seven rule-based baselines ship today (the honest bar the learned agents must
+beat): `equal_weight`, `buy_and_hold`, `momentum`, `mean_reversion`,
+`inverse_vol`, `ma_trend` and `random`.
+
+With the `data` extra installed (`uv sync --extra data`), run them out-of-sample
+and print a metrics table (falls back to synthetic data if no network):
 
 ```bash
 uv run alphaduel-baselines            # live data (yfinance -> Stooq)
 uv run alphaduel-baselines --synthetic
+```
+
+### Dashboard
+
+An interactive Streamlit + Plotly dashboard to compare strategies — equity
+curves, drawdowns, rolling Sharpe, return distributions, allocation over time and
+a metrics table, with live controls for the universe, costs, weight caps,
+rebalance cadence and per-strategy hyperparameters.
+
+```bash
+uv sync --extra app
+uv run alphaduel-dashboard
 ```
 
 Programmatic use of the shared substrate:
@@ -115,8 +130,9 @@ alphaduel/
 │   │   ├── features.py      # point-in-time features (<= t, cross-sectional z-score)
 │   │   ├── splits.py        # chronological splits + no-lookahead asserts
 │   │   └── dataset.py       # MarketData container (prices + features + splits)
-│   ├── baselines/           # equal-weight, buy & hold, momentum
+│   ├── baselines/           # equal-weight, buy&hold, momentum, mean-rev, inverse-vol, MA-trend, random
 │   ├── eval/                # metrics, backtest, walk-forward
+│   ├── dashboard/           # Streamlit + Plotly strategy lab (service + app)
 │   └── utils/prices.py      # synthetic GBM prices for dev/tests
 └── tests/
 ```
@@ -128,7 +144,8 @@ alphaduel/
 - **M3 — LLM branch (A):** verbalized state, optional SFT, GRPO (Qwen 1.5B → 3B); include a zero-shot baseline.
 - **M4 — Comparison v1:** A vs B on the same protocol; the marquee figure.
 - **M5 — Text/news (v2):** does language + headlines beat numeric-only? (the real "plus value")
-- **M6 — UI playground** (Streamlit) + **M7 — writeup & release**.
+- **M6 — UI playground** (Streamlit) ✅ strategy lab shipped early; extended per branch.
+- **M7 — writeup & release.**
 
 ## License
 
