@@ -24,6 +24,10 @@ _PALETTE = [
 _CASH_COLOR = "#b8b5a8"
 _TEXT = "#3d3a2a"
 _GRID = "rgba(61, 58, 42, 0.12)"
+# Sequential (weight) and diverging (buy/sell) colorscales, on-theme.
+# Zero maps to the cream background so "no position"/"hold" blends in.
+_WEIGHT_SCALE = [[0.0, "#f4f3ed"], [1.0, "#bb5a38"]]
+_TRADE_SCALE = [[0.0, "#a34a3f"], [0.5, "#f4f3ed"], [1.0, "#6b8e6b"]]
 
 _METRIC_LABELS = {
     "total_return": "Total Return",
@@ -205,6 +209,61 @@ def allocation_figure(market: MarketData, res: BacktestResult) -> go.Figure:
         yaxis_title="Weight",
         yaxis_range=[0, 1],
         hovermode="x unified",
+    )
+    return _finalize(fig)
+
+
+def allocation_heatmap_figure(market: MarketData, res: BacktestResult) -> go.Figure:
+    """Heatmap of per-asset position weights over time (state / holdings)."""
+    fig = go.Figure()
+    if res.weights.size == 0:
+        return _finalize(fig)
+
+    fig.add_trace(
+        go.Heatmap(
+            x=market.dates[res.value_index],
+            y=market.tickers,
+            z=res.weights.T,  # [K, T]
+            colorscale=_WEIGHT_SCALE,
+            zmin=0.0,
+            colorbar=dict(title="weight", tickformat=".0%"),
+            hovertemplate="%{y}<br>%{x|%Y-%m-%d}<br>weight = %{z:.1%}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title=f"Position weights over time — {res.name}",
+        xaxis_title="Date",
+        yaxis_title="Asset",
+    )
+    return _finalize(fig)
+
+
+def trades_heatmap_figure(market: MarketData, res: BacktestResult) -> go.Figure:
+    """Diverging heatmap of the actual actions: Δ-weight per asset per step
+    (green = buy, red = sell, blank = hold)."""
+    fig = go.Figure()
+    if res.weights.size == 0:
+        return _finalize(fig)
+
+    deltas = np.vstack([res.weights[0], np.diff(res.weights, axis=0)])
+    zmax = float(np.abs(deltas).max()) or 1.0
+    fig.add_trace(
+        go.Heatmap(
+            x=market.dates[res.value_index],
+            y=market.tickers,
+            z=deltas.T,  # [K, T]
+            colorscale=_TRADE_SCALE,
+            zmid=0.0,
+            zmin=-zmax,
+            zmax=zmax,
+            colorbar=dict(title="Δ weight", tickformat="+.0%"),
+            hovertemplate="%{y}<br>%{x|%Y-%m-%d}<br>Δ = %{z:+.1%}<extra></extra>",
+        )
+    )
+    fig.update_layout(
+        title=f"Trades (buy / sell) over time — {res.name}",
+        xaxis_title="Date",
+        yaxis_title="Asset",
     )
     return _finalize(fig)
 

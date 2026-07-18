@@ -71,3 +71,17 @@ def test_dashboard_service_runs_and_builds_figures():
     assert len(service.allocation_figure(md, results["equal_weight"]).data) >= md.n_assets
     service.rolling_sharpe_figure(md, results)
     service.returns_hist_figure(results)
+
+
+def test_action_heatmap_figures_build():
+    md = service.build_market("synthetic", n_assets=5, n_days=1200, seed=8)
+    cfg = RunConfig(train_end="2016-12-31", val_end="2017-12-31", split="test")
+    results = service.run_strategies(md, {"momentum": {"lookback": 40}}, cfg)
+    res = results["momentum"]
+
+    hm = service.allocation_heatmap_figure(md, res)
+    tr = service.trades_heatmap_figure(md, res)
+    assert hm.data[0].type == "heatmap"
+    assert tr.data[0].type == "heatmap"
+    assert np.asarray(hm.data[0].z).shape[0] == md.n_assets
+    assert np.asarray(tr.data[0].z).shape[0] == md.n_assets

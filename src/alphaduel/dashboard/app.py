@@ -111,11 +111,22 @@ def main() -> None:
     )
     right2.plotly_chart(service.returns_hist_figure(results), width="stretch", theme=None)
 
-    st.subheader("Allocation over time")
-    choice = st.selectbox("Strategy", list(results.keys()))
-    st.plotly_chart(
-        service.allocation_figure(market, results[choice]), width="stretch", theme=None
+    st.subheader("Policy actions over time")
+    ctrl1, ctrl2 = st.columns(2)
+    choice = ctrl1.selectbox("Strategy", list(results.keys()))
+    view = ctrl2.radio(
+        "View",
+        ["Weights heatmap", "Trades (buy/sell)", "Stacked area"],
+        horizontal=True,
     )
+    res = results[choice]
+    if view == "Weights heatmap":
+        fig = service.allocation_heatmap_figure(market, res)
+    elif view == "Trades (buy/sell)":
+        fig = service.trades_heatmap_figure(market, res)
+    else:
+        fig = service.allocation_figure(market, res)
+    st.plotly_chart(fig, width="stretch", theme=None)
 
 
 main()
