@@ -26,6 +26,7 @@ data/processed/
 checkpoints/
 outputs/
 wandb/
+logs/
 
 # Notebooks
 .ipynb_checkpoints/

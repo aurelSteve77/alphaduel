@@ -1,20 +1,98 @@
 # Default configuration for the alphaduel study.
 # Every branch (LLM + quant) reads this same file to guarantee parity.
 
-seed: 42
+seed: 77
+
+# Default Gymnasium trading-env knobs (CLI / code overrides win).
+env:
+  start: "2020-01-01"
+  end: "2024-12-31"
+  # When omitted, falls back to data.tickers.
+  # tickers: []
+  initial_cash: 100000.0
+  transaction_fee: 0.001          # 10 bps of notional traded
+  n_days: 252                     # max trading days per episode
+  max_shares: 10                  # max buy/sell shares per ticker per day
+  allow_short: false
+  include_news: false
+  reward_scale: 1.0
+  features:
+    - close
+    - pct_change_1d
+    - pct_change_5d
+    - rsi_14
+    - volatility_20d
+    - sma_ratio_20d
 
 data:
-  tickers: [AAPL, MSFT, JNJ, JPM, XOM, PG, KO, WMT, HD, CVX]
-  start: "2015-01-01"
-  end: "2024-12-31"
-  train_end: "2021-12-31"
-  val_end: "2022-12-31"
+  # Universe and date range shared by every branch. CLI args override these.
+  # 25 US + 25 EU large-caps (EU symbols use Yahoo Finance exchange suffixes).
+  tickers:
+    # --- US (25) ---
+    - AAPL   # Apple
+    - MSFT   # Microsoft
+    - GOOGL  # Alphabet
+    - AMZN   # Amazon
+    - META   # Meta
+    - NVDA   # NVIDIA
+    - TSLA   # Tesla
+    - BRK-B  # Berkshire Hathaway
+    - JPM    # JPMorgan Chase
+    - V      # Visa
+    - UNH    # UnitedHealth
+    - XOM    # Exxon Mobil
+    - JNJ    # Johnson & Johnson
+    - WMT    # Walmart
+    - PG     # Procter & Gamble
+    - MA     # Mastercard
+    - HD     # Home Depot
+    - CVX    # Chevron
+    - ABBV   # AbbVie
+    - MRK    # Merck
+    - COST   # Costco
+    - PEP    # PepsiCo
+    - KO     # Coca-Cola
+    - AVGO   # Broadcom
+    - NFLX   # Netflix
+    # --- EU (25) ---
+  start: "2000-01-01"
+  end: "2026-07-30"
 
-env:
-  budget: 100000.0
-  cost_bps: 5.0          # round-trip transaction cost on turnover (basis points)
-  max_weight: 0.30       # long-only cap per asset
-  allow_short: false
-  rebalance_every: 1     # Δ: trading days per decision (1 = daily)
-  obs_window: 21         # past-returns window exposed in the observation
-  horizon: 252           # episode length in steps
+  market:
+    cache_dir: data/raw/market
+
+  # Textual (news / filings) data aligned point-in-time to each trading date.
+  news:
+    cache_dir: data/raw/news
+    finnhub:
+      # API key is read from this environment variable (never commit secrets).
+      api_key_env: FINNHUB_API_KEY
+    edgar:
+      # SEC requires a descriptive User-Agent with a contact address.
+      user_agent: "alphaduel research (avomoa@gmail.com)"
+      forms: ["8-K", "10-Q", "10-K"]
+
+  # Merged market + news panel produced by alphaduel.data.dataset.
+  merged:
+    cache_dir: data/processed
+
+logging:
+  level: INFO
+  format: "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+  datefmt: "%Y-%m-%d %H:%M:%S"
+  to_stdout: true
+  to_file: true
+  log_dir: logs
+  filename: alphaduel.log
+  # Size-based rotation (active when enabled).
+  rotation:
+    enabled: true
+    max_bytes: 10485760  # 10 MiB
+    backup_count: 5
+  # Time-based rotation (optional second file handler).
+  timed_rotation:
+    enabled: false
+    filename: alphaduel.timed.log
+    when: midnight
+    interval: 1
+    backup_count: 14
