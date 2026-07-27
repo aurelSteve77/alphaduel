@@ -50,7 +50,7 @@ alphaduel-dashboard = "alphaduel.dashboard.launch:main"
 dev = ["jupyterlab>=4.6.1", "ipywidgets>=8.1.8", "pytest>=8.0"]
 
 # UI
-dashboard = ["streamlit>=1.59.2"]
+dashboard = ["streamlit>=1.59.2", "plotly>=5.20"]
 
 # Data
 data = [

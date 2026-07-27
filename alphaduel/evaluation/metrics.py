@@ -67,6 +67,10 @@ class EvalResult:
     holdings: list[list[float]] = field(default_factory=list)
     tickers: list[str] = field(default_factory=list)
     trades: list[TradeRecord] = field(default_factory=list)
+    # Per trading decision (length == n_steps); aligned with rewards[1:].
+    actions: list[list[int]] = field(default_factory=list)
+    rationales: list[str] = field(default_factory=list)
+    decision_dates: list[str] = field(default_factory=list)
     metrics: EvalMetrics | None = None
     extras: dict[str, Any] = field(default_factory=dict)
 
@@ -88,6 +92,30 @@ class EvalResult:
                 columns=["date", "ticker", "shares", "price", "fee", "side"]
             )
         return pd.DataFrame([t.__dict__ for t in self.trades])
+
+    def holdings_frame(self) -> pd.DataFrame:
+        if not self.holdings or not self.tickers:
+            return pd.DataFrame(columns=["date", *self.tickers])
+        frame = pd.DataFrame(self.holdings, columns=self.tickers)
+        frame.insert(0, "date", self.dates)
+        return frame
+
+    def decisions_frame(self) -> pd.DataFrame:
+        """One row per trading decision (action + rationale)."""
+        if not self.decision_dates:
+            cols = ["date", "rationale", *(f"Δ{t}" for t in self.tickers)]
+            return pd.DataFrame(columns=cols)
+        rows: list[dict[str, Any]] = []
+        for i, date in enumerate(self.decision_dates):
+            row: dict[str, Any] = {
+                "date": date,
+                "rationale": self.rationales[i] if i < len(self.rationales) else "",
+            }
+            action = self.actions[i] if i < len(self.actions) else []
+            for j, ticker in enumerate(self.tickers):
+                row[f"Δ{ticker}"] = int(action[j]) if j < len(action) else 0
+            rows.append(row)
+        return pd.DataFrame(rows)
 
 
 def max_drawdown(values: list[float] | np.ndarray) -> float:
