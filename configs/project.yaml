@@ -6,12 +6,12 @@ seed: 77
 # Default Gymnasium trading-env knobs (CLI / code overrides win).
 env:
   start: "2020-01-01"
-  end: "2024-12-31"
+  end: "2025-12-31"
   # When omitted, falls back to data.tickers.
   # tickers: []
-  initial_cash: 100000.0
+  initial_cash: 10000.0
   transaction_fee: 0.001          # 10 bps of notional traded
-  n_days: 252                     # max trading days per episode
+  n_days: 60                     # max trading days per episode
   max_shares: 10                  # max buy/sell shares per ticker per day
   allow_short: false
   include_news: false
@@ -23,6 +23,15 @@ env:
     - rsi_14
     - volatility_20d
     - sma_ratio_20d
+
+# LLM policy (Ollama via langchain-ollama).
+llm:
+  model: "qwen3.5:2b"
+  temperature: 0.0
+  reasoning: false
+  # base_url: "http://127.0.0.1:11434"
+  prompt_group: llm_policy
+  max_history: 10                 # prior user/ai turn pairs (null = unlimited)
 
 data:
   # Universe and date range shared by every branch. CLI args override these.

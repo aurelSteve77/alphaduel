@@ -1,0 +1,26 @@
+# Random agent baseline for smoke-testing the eval pipeline.
+# Run:  uv run alphaduel eval --strategy random
+
+name: random
+kind: random
+
+env:
+  start: "2025-10-01"
+  end: "2025-12-31"
+  tickers:
+    - AAPL
+    - MSFT
+  initial_cash: 10000.0
+  transaction_fee: 0.001
+  n_days: 60
+  max_shares: 3
+
+policy:
+  seed: 77
+
+eval:
+  seed: 77
+  output_dir: reports/eval/random
+  save_plots: true
+  show_plots: false
+  save_trajectory: true

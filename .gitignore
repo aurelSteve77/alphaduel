@@ -25,6 +25,7 @@ data/processed/
 *.csv
 checkpoints/
 outputs/
+reports/
 wandb/
 logs/
 

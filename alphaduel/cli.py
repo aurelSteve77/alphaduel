@@ -99,6 +99,73 @@ def _run_download(args: argparse.Namespace) -> int:
 
 
 # --------------------------------------------------------------------------- #
+# eval
+# --------------------------------------------------------------------------- #
+def _add_eval_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--strategy",
+        "-s",
+        required=True,
+        help=(
+            "Strategy YAML path or bare name under configs/strategies/ "
+            "(e.g. buy_and_hold or configs/strategies/llm_policy.yaml)."
+        ),
+    )
+    parser.add_argument(
+        "--out",
+        default=None,
+        help="Override eval.output_dir from the strategy YAML.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Override eval.seed.",
+    )
+    parser.add_argument(
+        "--show",
+        action="store_true",
+        help="Display matplotlib charts interactively.",
+    )
+    parser.add_argument(
+        "--no-plots",
+        action="store_true",
+        help="Skip writing/showing plots.",
+    )
+
+
+def _run_eval(args: argparse.Namespace) -> int:
+    from alphaduel.evaluation import StrategyRunConfig, evaluate, render_evaluation
+
+    run = StrategyRunConfig.from_yaml(args.strategy)
+
+    # Apply CLI overrides onto the loaded eval settings.
+    eval_updates: dict[str, object] = {}
+    if args.out is not None:
+        eval_updates["output_dir"] = args.out
+    if args.seed is not None:
+        eval_updates["seed"] = args.seed
+    if args.show:
+        eval_updates["show_plots"] = True
+    if args.no_plots:
+        eval_updates["save_plots"] = False
+        eval_updates["show_plots"] = False
+    if eval_updates:
+        run = run.model_copy(update={"eval": run.eval.model_copy(update=eval_updates)})
+
+    log.info("Evaluating strategy=%s kind=%s", run.name, run.kind)
+    result = evaluate(run)
+    render_evaluation(
+        result,
+        output_dir=run.eval.output_dir,
+        save_plots=run.eval.save_plots,
+        show_plots=run.eval.show_plots,
+        save_trajectory=run.eval.save_trajectory,
+    )
+    return 0
+
+
+# --------------------------------------------------------------------------- #
 # subcommand registry
 # --------------------------------------------------------------------------- #
 Subcommand = dict[str, object]
@@ -108,6 +175,11 @@ SUBCOMMANDS: dict[str, Subcommand] = {
         "help": "Download market and/or news data and optionally merge them.",
         "add_args": _add_download_args,
         "run": _run_download,
+    },
+    "eval": {
+        "help": "Evaluate a strategy YAML (metrics + equity/reward/fee plots).",
+        "add_args": _add_eval_args,
+        "run": _run_eval,
     },
 }
 

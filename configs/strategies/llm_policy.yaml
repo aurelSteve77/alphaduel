@@ -1,0 +1,31 @@
+# Example LLM-policy evaluation.
+# Run:  uv run alphaduel eval --strategy configs/strategies/llm_policy.yaml
+
+name: llm_policy
+kind: llm_policy
+
+env:
+  start: "2025-10-01"
+  end: "2025-12-31"
+  tickers:
+    - AAPL
+    - MSFT
+    - NVDA
+  initial_cash: 10000.0
+  transaction_fee: 0.001
+  n_days: 60
+  max_shares: 5
+  include_news: false
+
+policy:
+  # Overrides configs/project.yaml → llm.*
+  model: "qwen3.5:0.8b"
+  # temperature: 0.0
+  # max_history: 10
+
+eval:
+  seed: 77
+  output_dir: reports/eval/llm_policy
+  save_plots: true
+  show_plots: false
+  save_trajectory: true

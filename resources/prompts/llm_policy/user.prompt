@@ -1,0 +1,30 @@
+Decide today's trades. Reason in free-form text, then end with a fenced JSON action block:
+
+```json
+{"actions": {"TICKER": <int>, "...": <int>}}
+```
+
+Date: {{ date }}
+Step: {{ step }}
+Portfolio value: {{ portfolio_value }}
+Cash: {{ cash }}
+
+Holdings (shares):
+{% for ticker, shares in holdings.items() -%}
+- {{ ticker }}: {{ shares }}
+{% endfor %}
+
+Features by ticker:
+{% for ticker, feats in features.items() -%}
+- {{ ticker }}: {{ feats }}
+{% endfor %}
+
+{% if news -%}
+News:
+{% for ticker, items in news.items() -%}
+- {{ ticker }}: {{ items }}
+{% endfor %}
+{% endif -%}
+
+Universe: {{ tickers | join(", ") }}
+Share deltas must be in [-{{ max_shares }}, {{ max_shares }}].

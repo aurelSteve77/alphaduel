@@ -1,0 +1,26 @@
+# Offline baseline — no LLM required.
+# Run:  uv run alphaduel eval --strategy buy_and_hold
+
+name: buy_and_hold
+kind: buy_and_hold
+
+env:
+  start: "2025-10-01"
+  end: "2025-12-31"
+  tickers:
+    - AAPL
+    - MSFT
+    - NVDA
+  initial_cash: 10000.0
+  transaction_fee: 0.001
+  n_days: 60
+  max_shares: 5
+
+policy: {}
+
+eval:
+  seed: 77
+  output_dir: reports/eval/buy_and_hold
+  save_plots: true
+  show_plots: false
+  save_trajectory: true
