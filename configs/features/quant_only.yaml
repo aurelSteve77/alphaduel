@@ -1,0 +1,8 @@
+# Ablation switchboard: quant-only feature set (P0 default).
+features:
+  technical: true
+  macro: false
+  text: false
+  technical_windows: [5, 10, 20]
+  rsi_period: 14
+  include_portfolio_state: true

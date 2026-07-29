@@ -1,0 +1,8 @@
+# Quant + macro feature set (ablation variant).
+features:
+  technical: true
+  macro: true
+  text: false
+  technical_windows: [5, 10, 20]
+  rsi_period: 14
+  include_portfolio_state: true

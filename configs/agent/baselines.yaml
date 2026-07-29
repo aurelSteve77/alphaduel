@@ -1,0 +1,13 @@
+# Naive baselines (mandatory reference points).
+agents:
+  - name: buy_and_hold
+    kind: baseline
+    params: {}
+  - name: random
+    kind: baseline
+    params:
+      seed: 0
+  - name: momentum
+    kind: baseline
+    params:
+      lookback: 20

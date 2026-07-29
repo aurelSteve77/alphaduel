@@ -1,0 +1,12 @@
+# PPO quant agent (P1). Requires the `rl` optional dependencies.
+agents:
+  - name: ppo
+    kind: rl
+    params:
+      algorithm: PPO
+      total_timesteps: 200000
+      policy: MlpPolicy
+      learning_rate: 0.0003
+      n_steps: 2048
+      batch_size: 64
+      gamma: 0.99
