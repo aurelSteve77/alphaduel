@@ -22,6 +22,8 @@ mlruns/
 .pytest_cache/
 *.parquet
 *.log
+logs/
+.alphaduel/
 
 # Notebooks
 .ipynb_checkpoints/

@@ -34,6 +34,7 @@ Non-goals: a production trading system, a profitable strategy, or HFT/microstruc
 | **P2** | Off-the-shelf LLM agent (with leakage controls), news/text features + sentiment embeddings for the quant side | Planned |
 | **P3** | Trained LLM: SFT on synthetic traces → GRPO/DPO | Planned |
 | **P4** | Live dashboard + multi-asset portfolio | Planned |
+| **P5** | `GenPortfolio`: autoregressive generative book construction (see §15) | Exploratory |
 
 **MVP decisions (locked):** single asset · weight-based actions · quant-only features + baselines · single local GPU (16–24 GB) · free data only (yfinance / FRED / GDELT) · YAML + Pydantic config · MLflow tracking.
 
@@ -194,3 +195,114 @@ The project is "portfolio-grade" when it can, from a single config + seed, repro
 - LLM memorization is a fundamental confound; mitigated but not eliminated.
 - Multi-asset integer-action RL and LLM-RL (GRPO/DPO) are compute-heavy and deferred.
 - Results are historical-path dependent; conclusions are statistical, not guarantees.
+
+---
+
+## 15. Exploratory direction (P5): `GenPortfolio` — generative book construction
+
+Inspired by Netflix's **GenPage** (end-to-end generative homepage construction), this
+direction reframes portfolio construction as **autoregressive generation of a structured
+book** with a single decoder-only transformer, replacing a multi-stage
+score-then-optimize pipeline. It is an *agent family*, benchmarked identically to the
+baselines / RL / LLM arms.
+
+### 15.1 Analogy (GenPage → finance)
+
+| GenPage (Netflix) | AlphaDuel analog |
+|---|---|
+| Homepage (2D layout of rows + entities) | Portfolio / book (sleeves × positions × weights) |
+| Row (e.g. "Korean TV Shows") | Sleeve / sector / factor bucket / strategy |
+| Entity (movie, game) | Security (stock, ETF, …) |
+| Layout order (left→right, top→bottom) | Sizing order (highest-conviction / largest-weight first) |
+| Context prompt (history, profile, request) | Market state: quant features + macro + news + holdings + mandate |
+| Page-level reward (Σ entity rewards) | Book reward: risk-adjusted PnL − turnover − constraint penalties |
+| Reward *system* (observed feedback → scalar) | Realized forward risk-adjusted return over horizon |
+| Reward *model* (predicts reward of unseen page) | Learned book-outcome predictor for RL rollouts |
+| Constrained decoding (token masks = business rules) | Mandate enforcement: sector caps, position limits, leverage, liquidity |
+| Cold start (semantic embedding fusion) | New listings via content embeddings (filings, fundamentals, sector) |
+| Diversity emerging from page-level RL | Diversification / decorrelation emerging from book-level RL |
+| Context enrichment > model capacity | Feature/alt-data richness > model size (to be tested) |
+
+### 15.2 Core idea
+
+A decoder-only transformer that, given the tokenized market state + mandate + current
+holdings, **generates the target portfolio one position at a time** (`[Sleeve_ID]` →
+`[Security_ID]` → `[Weight_Bucket]` → …), optimizing a **whole-book reward** rather than
+scoring names in isolation. The motivation is that position sizing is interaction-
+dependent (correlation, factor exposure, concentration) — the direct analog of GenPage's
+"diversity / stopping-power" interactions, which flat per-name scorers cannot capture.
+
+### 15.3 Domain-specific tokenization (the crux)
+
+Per GenPage's headline finding (*context/representation matters more than capacity*):
+- **Security tokens** — one token per instrument (vocab refreshed daily); input embedding
+  = **fusion of a learned ID embedding + a content embedding** (filings / fundamentals /
+  sector) → cold-start for new listings, with a `[Security_Fallback]` token trained via
+  random dropout.
+- **Quant-context tokens** — bucketized returns, realized vol, factor loadings, RSI,
+  liquidity/ADV, with segment markers (`[PRICES]`, `[FACTORS]`, `[MACRO]`).
+  Bucket edges are **fit on train only** (a leakage vector — see §4.1).
+- **Holding/action tokens** — `[Buy]/[Sell]/[Hold]`, `[Weight_Bucket]`, current position.
+- **Output** — `[Sleeve_ID] [Security_ID] [Weight_Bucket]` repeated → serialized book.
+
+### 15.4 Training recipe (mirrors GenPage)
+
+1. **Pretrain** (next-token prediction) to imitate a *panel of classical policies*
+   (risk-parity, momentum, min-variance, equal-weight). This is the finance substitute for
+   "imitate the mature production recommender" — there is no single known-good policy to
+   copy, so we imitate an ensemble (or use self-supervised next-return prediction).
+2. **WBC post-training** — per-position value head; binary label from the sign of the
+   position's forward risk-adjusted contribution, weight from its magnitude. Cheap, strong
+   entity-level baseline; greedy value-decoding at inference.
+3. **RL post-training** — Dr. GRPO with a **reward model** predicting book-level outcome,
+   a **KL penalty to the pretrained reference** (keeps pages in the reward model's coverage
+   region; limits reward hacking), plus **format rewards** (weights sum to 1, no
+   over-concentration, business-critical constraints).
+
+### 15.5 Constrained decoding = live risk/compliance
+
+At each generation step, mask ineligible security tokens (sector at cap → mask sleeve;
+illiquid name → mask; short disallowed → mask oversized sells). Because each security/
+sleeve is a single token, mandate rules map directly to token-level masks: **the model
+cannot emit a non-compliant book by construction** — a strong risk/compliance story.
+
+### 15.6 The text-vs-quant question, reframed (hybrid tokenization)
+
+Rather than comparing two separate agents, build **one** generative model with a **hybrid
+vocabulary**: quantitative tokens (price/vol/factor buckets, security IDs) interleaved with
+text tokens (headlines / filings). Toggling the text-token stream on/off isolates
+*reasoning modality* within a single model and objective — a sharper version of the central
+research question in this spec.
+
+### 15.7 Integration with the existing package
+
+- New agent `agents/generative/genportfolio.py` implementing the existing `Agent`
+  interface → benchmarked identically to `buy_and_hold`, `momentum`, PPO.
+- Extend `AlphaDuelGym` from single-asset weight action → **multi-asset weight vector**
+  (already the P4 target); GenPortfolio's output *is* that vector.
+- Reuse `FeatureStore` to emit quant-context tokens; reuse `envs/costs.py` turnover inside
+  the book-level reward; reuse `evaluation/` (walk-forward, deflated Sharpe, bootstrap CIs)
+  unchanged for a fair comparison.
+- `leakage/` gains a tokenizer check: bucket edges and the security vocabulary must be
+  point-in-time (delisted names → survivorship bias).
+
+### 15.8 Finance-specific caveats (stated up front)
+
+- **No mature policy to imitate** → imitate a classical-strategy ensemble / self-supervised
+  objective instead.
+- **Adversarial, reflexive, non-stationary market** (a homepage does not fight back) →
+  evaluate only on risk-adjusted, cost-net, regime-segmented, walk-forward returns.
+- **Reward hacking is more dangerous** → KL-to-reference + hard constraint penalties are
+  mandatory, not optional.
+- **Low SNR / overfitting** → GenPage's "scaling helps" may not hold; expect context
+  enrichment to dominate capacity even more strongly (a testable hypothesis).
+
+### 15.9 MVP slice
+
+20–50 liquid US equities, daily bars (existing yfinance/FRED rails) → domain tokenizer
+(content-fused security tokens + bucketized quant context) → ~10–50M-param decoder-only
+transformer (fits a single 16–24 GB GPU) → pretrain on risk-parity + momentum books → WBC
+post-train → (stretch) Dr. GRPO with a book-reward model → constrained decoding for sector/
+position limits → benchmark vs buy-and-hold / equal-weight / PPO via the existing
+walk-forward harness → ablation: hybrid text tokens on/off.
+

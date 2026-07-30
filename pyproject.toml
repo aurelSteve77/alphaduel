@@ -38,6 +38,9 @@ llm = [
     "peft>=0.11",
     "accelerate>=0.31",
 ]
+generative = [
+    "torch>=2.2",
+]
 dashboard = [
     "streamlit>=1.36",
     "plotly>=5.22",
@@ -59,9 +62,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/alphaduel"]
 
-[tool.uv]
-index-url = "https://repository.saas.cagip.group.gca/artifactory/api/pypi/pypi-remote/simple"
-allow-insecure-host = ["repository.saas.cagip.group.gca"]
 
 [tool.ruff]
 line-length = 100

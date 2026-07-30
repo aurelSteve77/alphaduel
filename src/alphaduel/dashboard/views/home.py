@@ -1,0 +1,50 @@
+"""Landing page: app-style hero, feature cards and quick links."""
+
+from __future__ import annotations
+
+import streamlit as st
+
+from alphaduel.dashboard import state
+
+
+def _link(page_key: str, label: str, icon: str) -> None:
+    page = st.session_state.get("_pages", {}).get(page_key)
+    if page is not None:
+        st.page_link(page, label=label, icon=icon, use_container_width=True)
+
+
+def render() -> None:
+    params = state.ensure_params()
+
+    st.title("📈 AlphaDuel")
+    st.subheader("Benchmark RL, LLM and generative agents on one trading environment.")
+    st.write(
+        "A reproducible arena where quantitative and language-model agents trade the same "
+        "market under identical costs, execution rules and risk-adjusted rewards. "
+        "Everything below runs on **mock data** — no market access required."
+    )
+
+    st.divider()
+
+    c1, c2, c3 = st.columns(3)
+    with c1.container(border=True):
+        st.markdown("### ⚙️ Configure")
+        st.caption("Design the experiment: universe, market regime, costs and reward.")
+        _link("configure", "Open configuration", "⚙️")
+    with c2.container(border=True):
+        st.markdown("### 🎬 Live run")
+        st.caption("Pick an agent, tune it, and watch its decisions step by step.")
+        _link("live", "Launch a live run", "🎬")
+    with c3.container(border=True):
+        st.markdown("### 📊 Analyze")
+        st.caption("Compare every agent: equity, drawdown and a risk-adjusted leaderboard.")
+        _link("overview", "Open overview", "📊")
+
+    st.divider()
+
+    m = params
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Universe", "Multi-asset" if m["mode"] == "multi_asset" else "Single asset")
+    k2.metric("Assets", m["n_assets"] if m["mode"] == "multi_asset" else 1)
+    k3.metric("Agents selected", len(m["agent_names"]))
+    k4.metric("Episode length", f"{m['episode_length']}d")

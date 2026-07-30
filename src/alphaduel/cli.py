@@ -9,24 +9,36 @@ from rich.console import Console
 from rich.table import Table
 
 from alphaduel.config.loader import load_experiment_config, resolve_config_hash
-from alphaduel.config.schema import Secrets
+from alphaduel.config.schema import ExperimentConfig, Secrets
+from alphaduel.log import get_logger, setup_logging
 from alphaduel.pipeline import build_panel, download_data, evaluate_agents
 from alphaduel.tracking import log_metrics, mlflow_run
 
 app = typer.Typer(add_completion=False, help="AlphaDuel: benchmark RL vs LLM trading agents.")
 console = Console()
+log = get_logger(__name__)
 
 _CONFIG_OPT = typer.Option(..., "--config", "-c", help="Path to an experiment YAML.")
+
+
+def _load(config: Path) -> ExperimentConfig:
+    """Load a config and configure logging from its ``logging`` section."""
+    cfg = load_experiment_config(config)
+    lg = cfg.logging
+    setup_logging(
+        level=lg.level, log_dir=lg.log_dir, log_file=lg.log_file, use_rich=lg.rich_console
+    )
+    return cfg
 
 
 @app.command()
 def download(config: Path = _CONFIG_OPT) -> None:
     """Fetch and cache all data sources for an experiment."""
-    cfg = load_experiment_config(config)
+    cfg = _load(config)
     secrets = Secrets()
-    console.print(f"[bold]Downloading data[/bold] for {cfg.data.symbols} ...")
+    log.info("Downloading data for %s ...", cfg.data.symbols)
     download_data(cfg, secrets)
-    console.print("[green]Done.[/green] Cached under", secrets.data_dir)
+    log.info("Done. Cached under %s", secrets.data_dir)
 
 
 @app.command()
@@ -46,17 +58,21 @@ def dashboard() -> None:
     """Launch the Streamlit dashboard (requires the `dashboard` extra)."""
     import subprocess
 
-    app_path = Path(__file__).resolve().parents[2] / "dashboard" / "app.py"
-    subprocess.run(["streamlit", "run", str(app_path)], check=False)
+    app_path = Path(__file__).resolve().parent / "dashboard" / "app.py"
+    # Run from the project root so Streamlit finds .streamlit/config.toml (CWD-relative).
+    project_root = Path(__file__).resolve().parents[2]
+    subprocess.run(["streamlit", "run", str(app_path)], check=False, cwd=project_root)
 
 
 def _run_and_report(config: Path) -> None:
-    cfg = load_experiment_config(config)
+    cfg = _load(config)
     secrets = Secrets()
     config_hash = resolve_config_hash(cfg)
+    log.info("Experiment %s (%s)", cfg.name, config_hash)
     console.print(f"[bold]Experiment[/bold] {cfg.name} [dim]({config_hash})[/dim]")
 
     panel = build_panel(cfg, secrets)
+    log.info("Panel built: %s steps, %s features.", panel.n_steps, panel.n_features)
     console.print(f"Panel: {panel.n_steps} steps, {panel.n_features} features.")
 
     with mlflow_run(cfg, secrets, config_hash):
@@ -65,6 +81,7 @@ def _run_and_report(config: Path) -> None:
             flat = {f"{agent_name}.{m}": v["mean"] for m, v in summary.items()}
             log_metrics(flat)
 
+    log.info("Evaluation complete for %d agents.", len(results))
     _print_results(results)
 
 

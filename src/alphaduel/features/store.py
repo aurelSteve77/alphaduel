@@ -42,6 +42,30 @@ class MarketPanel:
         return self.features.shape[1]
 
 
+@dataclass
+class MultiAssetPanel:
+    """Aligned OHLC + per-security features for N symbols (P5 / GenPortfolio)."""
+
+    timestamps: pd.DatetimeIndex
+    symbols: list[str]
+    open: np.ndarray   # shape (T, N)
+    close: np.ndarray  # shape (T, N)
+    features: np.ndarray  # shape (T, N, F)
+    feature_names: list[str] = field(default_factory=list)
+
+    @property
+    def n_steps(self) -> int:
+        return len(self.timestamps)
+
+    @property
+    def n_assets(self) -> int:
+        return len(self.symbols)
+
+    @property
+    def n_features(self) -> int:
+        return self.features.shape[2]
+
+
 class FeatureStore:
     def __init__(self, config: FeatureConfig) -> None:
         self.config = config
@@ -93,3 +117,37 @@ class FeatureStore:
     def manifest_hash(self, panel: MarketPanel) -> str:
         payload = "|".join(panel.feature_names) + f"|{panel.n_steps}"
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+    def build_multi_asset_panel(
+        self,
+        prices: pd.DataFrame,
+        symbols: list[str],
+        macro: pd.DataFrame | None = None,
+    ) -> MultiAssetPanel:
+        """Build per-symbol panels and align them on their common (inner-join) dates."""
+        per_symbol = {s: self.build_panel(prices, s, macro) for s in symbols}
+
+        # Intersect timestamps so every symbol has data on every kept date.
+        common = per_symbol[symbols[0]].timestamps
+        for s in symbols[1:]:
+            common = common.intersection(per_symbol[s].timestamps)
+        if len(common) == 0:
+            raise ValueError("No overlapping dates across the requested symbols.")
+
+        feature_names = per_symbol[symbols[0]].feature_names
+        opens, closes, feats = [], [], []
+        for s in symbols:
+            p = per_symbol[s]
+            mask = p.timestamps.isin(common)
+            opens.append(p.open[mask])
+            closes.append(p.close[mask])
+            feats.append(p.features[mask])
+
+        return MultiAssetPanel(
+            timestamps=common,
+            symbols=list(symbols),
+            open=np.stack(opens, axis=1),      # (T, N)
+            close=np.stack(closes, axis=1),    # (T, N)
+            features=np.stack(feats, axis=1),  # (T, N, F)
+            feature_names=feature_names,
+        )

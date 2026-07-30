@@ -97,6 +97,7 @@ class RewardConfig(BaseModel):
 
 
 class EnvConfig(BaseModel):
+    kind: Literal["single_asset", "multi_asset"] = "single_asset"
     initial_cash: float = 100_000.0
     episode_length: int = 60  # trading days
     execution_lag: int = 1  # decide on t, execute at t+1 open (leakage guard)
@@ -112,7 +113,7 @@ class EnvConfig(BaseModel):
 
 class AgentConfig(BaseModel):
     name: str = "buy_and_hold"
-    kind: Literal["baseline", "rl", "llm"] = "baseline"
+    kind: Literal["baseline", "rl", "llm", "generative"] = "baseline"
     # Free-form, agent-specific params (SB3 kwargs, LLM model id, prompt version...).
     params: dict = Field(default_factory=dict)
 
@@ -142,6 +143,13 @@ class TrackingConfig(BaseModel):
     tags: dict[str, str] = Field(default_factory=dict)
 
 
+class LoggingConfig(BaseModel):
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
+    log_dir: str | None = "logs"  # None disables file logging
+    log_file: str = "alphaduel.log"
+    rich_console: bool = True
+
+
 # ----------------------------------------------------------------------- top level
 
 
@@ -154,3 +162,4 @@ class ExperimentConfig(BaseModel):
     agents: list[AgentConfig] = Field(default_factory=lambda: [AgentConfig()])
     evaluation: EvalConfig = EvalConfig()
     tracking: TrackingConfig = TrackingConfig()
+    logging: LoggingConfig = LoggingConfig()

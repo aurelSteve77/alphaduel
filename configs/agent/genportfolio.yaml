@@ -1,0 +1,23 @@
+# GenPortfolio generative agent (P5) + multi-asset baselines.
+# GenPortfolio defaults to use_model: false (constrained equal-weight prior) so the
+# experiment runs without torch. Set use_model: true (needs the `generative` extra) to
+# decode with the transformer once the pretrain/WBC/RL recipe is implemented.
+agents:
+  - name: genportfolio
+    kind: generative
+    params:
+      n_feature_buckets: 16
+      n_weight_buckets: 10
+      max_position_weight: 0.25
+      use_model: false
+      model_kwargs:
+        d_model: 256
+        n_heads: 4
+        n_layers: 4
+  - name: equal_weight
+    kind: baseline
+    params: {}
+  - name: random_weights
+    kind: baseline
+    params:
+      seed: 0

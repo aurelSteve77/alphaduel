@@ -1,0 +1,27 @@
+# P5 experiment: generative multi-asset book construction (GenPortfolio) vs baselines.
+# Composes reusable fragments; keys below override the includes.
+includes:
+  - ../data/multi_asset.yaml
+  - ../env/multi_asset.yaml
+  - ../features/quant_only.yaml
+  - ../agent/genportfolio.yaml
+
+name: p5_genportfolio
+seed: 42
+
+evaluation:
+  n_episodes: 20
+  bootstrap_samples: 1000
+  risk_free_rate: 0.0
+  splits:
+    scheme: walk_forward
+    train_days: 504
+    val_days: 126
+    test_days: 126
+    embargo_days: 5
+    n_folds: 3
+
+tracking:
+  enabled: true
+  tags:
+    phase: P5

@@ -1,0 +1,20 @@
+# Reusable env fragment: multi-asset, weight-vector actions, realistic costs.
+env:
+  kind: multi_asset
+  initial_cash: 100000.0
+  episode_length: 60
+  execution_lag: 1        # decide on t, execute at t+1 open (leakage guard)
+  action_space: weights
+  allow_short: false
+  costs:
+    commission_flat: 0.0
+    commission_per_share: 0.005
+    commission_bps: 1.0
+    half_spread_bps: 2.0
+    slippage_impact_coef: 0.1
+    use_sqrt_impact: false
+  reward:
+    kind: log_return
+    drawdown_penalty: 0.0
+    turnover_penalty: 0.0
+  random_start: true

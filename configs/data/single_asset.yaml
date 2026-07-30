@@ -1,8 +1,8 @@
 # Reusable data fragment: single-asset, free providers.
 data:
   symbols: ["AAPL"]
-  start: "2015-01-01"
-  end: "2023-12-31"
+  start: "2000-01-01"
+  end: "2026-06-31"
   prices:
     provider: yfinance
     interval: "1d"

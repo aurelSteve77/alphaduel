@@ -1,0 +1,13 @@
+# Reusable data fragment: multi-asset universe (P5 / GenPortfolio).
+data:
+  symbols: ["AAPL", "MSFT", "GOOGL", "AMZN", "JPM", "XOM", "JNJ", "PG", "NVDA", "TSLA"]
+  start: "2015-01-01"
+  end: "2023-12-31"
+  prices:
+    provider: yfinance
+    interval: "1d"
+  macro:
+    provider: fred
+    series: ["VIXCLS", "DGS10", "DGS2", "CPIAUCSL"]
+  news:
+    provider: none
