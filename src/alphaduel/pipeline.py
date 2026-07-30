@@ -23,13 +23,17 @@ from alphaduel.log import get_logger
 log = get_logger(__name__)
 
 
-def download_data(config: ExperimentConfig, secrets: Secrets) -> None:
+def download_data(
+    config: ExperimentConfig, secrets: Secrets, *, force: bool = False
+) -> None:
     """Fetch and cache all data sources declared in the config."""
     cache = ParquetCache(secrets.data_dir)
-    YahooPriceSource(cache).fetch(config.data.symbols, config.data.start, config.data.end)
+    YahooPriceSource(cache).fetch(
+        config.data.symbols, config.data.start, config.data.end, force=force
+    )
     if config.data.macro.provider == "fred":
         FredMacroSource(cache, secrets.fred_api_key, config.data.macro.series).fetch(
-            config.data.symbols, config.data.start, config.data.end
+            config.data.symbols, config.data.start, config.data.end, force=force
         )
 
 

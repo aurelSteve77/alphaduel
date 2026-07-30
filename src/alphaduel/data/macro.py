@@ -24,12 +24,17 @@ class FredMacroSource(DataSource):
         self.api_key = api_key
         self.series = series
 
-    def fetch(self, symbols: list[str], start: date, end: date) -> pd.DataFrame:
+    def fetch(
+        self, symbols: list[str], start: date, end: date, *, force: bool = False
+    ) -> pd.DataFrame:
         # ``symbols`` is unused for macro; the configured FRED series ids drive the fetch.
         params = {"series": sorted(self.series), "start": start, "end": end}
-        cached = self.cache.get(self.name, params)
-        if cached is not None:
-            return cached
+        if force:
+            self.cache.delete(self.name, params)
+        else:
+            cached = self.cache.get(self.name, params)
+            if cached is not None:
+                return cached
 
         if not self.api_key:
             raise RuntimeError("FRED_API_KEY is not set; add it to .env to fetch macro data.")

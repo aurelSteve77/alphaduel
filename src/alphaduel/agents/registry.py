@@ -44,9 +44,10 @@ def build_agent(config: AgentConfig) -> Agent:
         return agent
 
     if config.kind == "llm":
-        from alphaduel.agents.llm import OffShelfLLMAgent
+        from alphaduel.agents.llm import VanillaLLMAgent, resolve_llm
 
-        agent = OffShelfLLMAgent(**config.params)
+        llm, agent_params = resolve_llm(dict(config.params))
+        agent = VanillaLLMAgent(llm=llm, **agent_params)
         agent.name = config.name
         return agent
 

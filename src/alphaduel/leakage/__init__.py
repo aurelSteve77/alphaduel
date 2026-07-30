@@ -31,6 +31,7 @@ def assert_observation_is_causal(panel: MarketPanel, env: AlphaDuelGym, t: int) 
         close=panel.close,
         features=corrupted,
         feature_names=panel.feature_names,
+        symbol=getattr(panel, "symbol", "ASSET"),
     )
     env.t = t
     corrupted_obs = env._observation()

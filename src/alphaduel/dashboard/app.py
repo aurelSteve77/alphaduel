@@ -1,8 +1,7 @@
 """AlphaDuel dashboard entrypoint (multipage via ``st.navigation``).
 
 Streamlit runs this file directly. It sets up shared experiment state, builds the grouped
-navigation, and routes to the selected page. Uses a mock market so it works with no
-network / no real price downloads.
+navigation, and routes to the selected page. Uses real cached market data (yfinance).
 """
 
 from __future__ import annotations
@@ -10,7 +9,7 @@ from __future__ import annotations
 import streamlit as st
 
 from alphaduel.dashboard import state
-from alphaduel.dashboard.views import agent_detail, configure, home, live, market, overview
+from alphaduel.dashboard.views import agent_detail, configure, data, home, live, market, overview
 
 
 def _sidebar_status() -> None:
@@ -33,6 +32,7 @@ def main() -> None:
         "configure": st.Page(
             configure.render, title="Configure", icon="⚙️", url_path="configure"
         ),
+        "data": st.Page(data.render, title="Data", icon="📦", url_path="data"),
         "live": st.Page(live.render, title="Live run", icon="🎬", url_path="live"),
         "overview": st.Page(overview.render, title="Overview", icon="📊", url_path="overview"),
         "agent": st.Page(agent_detail.render, title="Agent detail", icon="🔍", url_path="agent"),
@@ -43,7 +43,7 @@ def main() -> None:
     nav = st.navigation(
         {
             "": [pages["home"]],
-            "Setup": [pages["configure"], pages["live"]],
+            "Setup": [pages["configure"], pages["data"], pages["live"]],
             "Analyze": [pages["overview"], pages["agent"], pages["market"]],
         }
     )

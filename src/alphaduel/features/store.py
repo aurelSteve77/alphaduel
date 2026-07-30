@@ -32,6 +32,7 @@ class MarketPanel:
     close: np.ndarray
     features: np.ndarray  # shape (T, n_features)
     feature_names: list[str] = field(default_factory=list)
+    symbol: str = "ASSET"
 
     @property
     def n_steps(self) -> int:
@@ -40,6 +41,11 @@ class MarketPanel:
     @property
     def n_features(self) -> int:
         return self.features.shape[1]
+
+    @property
+    def symbols(self) -> list[str]:
+        """Single-asset alias so callers can use the same ``symbols`` field as multi."""
+        return [self.symbol]
 
 
 @dataclass
@@ -112,6 +118,7 @@ class FeatureStore:
             close=combined["close"].to_numpy(dtype=np.float64),
             features=combined[feature_names].to_numpy(dtype=np.float32),
             feature_names=feature_names,
+            symbol=symbol,
         )
 
     def manifest_hash(self, panel: MarketPanel) -> str:

@@ -23,6 +23,7 @@ dependencies = [
     "rich>=13.7",
     "yfinance>=0.2.40",
     "fredapi>=0.5.2",
+    "jinja2>=3.1.6",
 ]
 
 [project.optional-dependencies]
@@ -32,14 +33,22 @@ rl = [
     "tensorboard>=2.16",
 ]
 llm = [
-    "transformers>=4.42",
-    "openai>=1.35",
-    "trl>=0.9",
-    "peft>=0.11",
-    "accelerate>=0.31",
+    # Vanilla off-the-shelf agents (ChatOllama + LangGraph). No torch / transformers.
+    "langchain-ollama>=1.1.0",
+    "langchain-core>=1.5.3",
+    "langgraph>=1.2.10",
+]
+llm-train = [
+    # Optional P3 fine-tuning stack (SFT / GRPO). Not required for the dashboard.
+    #"transformers>=4.42",
+    #"openai>=1.35",
+    #"trl>=0.9",
+    #"peft>=0.11",
+    #"accelerate>=0.31",
+    #"torch>=2.2",
 ]
 generative = [
-    "torch>=2.2",
+    #"torch>=2.2",
 ]
 dashboard = [
     "streamlit>=1.36",
@@ -50,6 +59,9 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
+    "ipykernel>=7.3.0",
+    "jupyterlab>=4.6.2",
+    "ipywidgets>=8.1.8",
 ]
 
 [project.scripts]

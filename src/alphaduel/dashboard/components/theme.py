@@ -18,6 +18,7 @@ _LABELS = {
     "inverse_volatility": "Inverse Vol",
     "random_weights": "Random Weights",
     "genportfolio": "GenPortfolio",
+    "llm_vanilla": "LLM Vanilla",
 }
 
 

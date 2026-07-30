@@ -39,10 +39,20 @@ def render() -> None:
     ep_seed = int(top[2].number_input("Episode seed", 0, 9999, int(run_params["seed"])))
 
     with st.expander("Agent parameters", expanded=True):
-        agent_params = agent_config.render(agent_name, key="live")
+        agent_params = agent_config.render(
+            agent_name, key="live", defaults=run_params
+        )
+
+    if agent_name in engine.LLM_AGENTS:
+        st.caption(
+            f"Ollama model `{agent_params.get('llm', {}).get('model', '?')}` · "
+            f"memory={'on' if agent_params.get('use_memory') else 'off'} · "
+            f"reasoning={'on' if agent_params.get('llm', {}).get('reasoning') else 'off'}"
+        )
 
     if st.button("🚀 Launch run", type="primary", use_container_width=True):
         _launch(run_params, mode, agent_name, agent_params, ep_seed, _SPEEDS[speed])
+
 
     run = st.session_state.get("last_live_run")
     if run is not None:
@@ -51,7 +61,13 @@ def render() -> None:
 
 
 def _launch(run_params, mode, agent_name, agent_params, ep_seed, delay) -> None:
-    env, agent, n_assets, symbols = engine.make_live_session(run_params, agent_name, agent_params)
+    try:
+        env, agent, n_assets, symbols = engine.make_live_session(
+            run_params, agent_name, agent_params
+        )
+    except Exception as exc:  # noqa: BLE001 — surface Ollama / import errors in the UI
+        st.error(f"Could not start agent: {exc}")
+        return
 
     st.subheader("Live decisions")
     kpi_ph = st.empty()
@@ -62,7 +78,10 @@ def _launch(run_params, mode, agent_name, agent_params, ep_seed, delay) -> None:
 
     step_state: dict = {}
     for step_state in engine.stream_episode(env, agent, n_assets, seed=ep_seed):
-        _render_step(step_state, symbols, run_params, mode, kpi_ph, chart_ph, alloc_ph, decision_ph)
+        _render_step(
+            step_state, symbols, run_params, mode, agent_name,
+            kpi_ph, chart_ph, alloc_ph, decision_ph,
+        )
         if delay:
             time.sleep(delay)
 
@@ -78,11 +97,16 @@ def _launch(run_params, mode, agent_name, agent_params, ep_seed, delay) -> None:
         "exposure": np.asarray(step_state["exposure"], dtype=float),
         "weights": np.vstack(step_state["weights_hist"]),
         "prices": np.vstack(step_state["prices"]),
+        "thoughts": list(step_state["thoughts"]),
+        "parse_oks": list(step_state["parse_oks"]),
+        "llm_actions": list(step_state["llm_actions"]),
     }
     st.success("Episode complete — see the evaluation below.")
 
 
-def _render_step(s, symbols, params, mode, kpi_ph, chart_ph, alloc_ph, decision_ph) -> None:
+def _render_step(
+    s, symbols, params, mode, agent_name, kpi_ph, chart_ph, alloc_ph, decision_ph
+) -> None:
     equity = np.asarray(s["equity"], dtype=float)
     step = s["step"]
     total = params["episode_length"]
@@ -101,7 +125,8 @@ def _render_step(s, symbols, params, mode, kpi_ph, chart_ph, alloc_ph, decision_
 
     weights = np.asarray(s["current_weights"], dtype=float).ravel()
     _allocation(weights, symbols, mode, step, alloc_ph)
-    _decision(weights, symbols, mode, s["thought"], decision_ph)
+    _decision(weights, symbols, mode, s, agent_name, decision_ph)
+
 
 
 def _equity_vs_market(equity, prices, step, chart_ph) -> None:
@@ -141,7 +166,7 @@ def _allocation(weights, symbols, mode, step, alloc_ph) -> None:
             st.progress(min(float(weights[0]), 1.0), text=f"Invested {float(weights[0]):.0%}")
 
 
-def _decision(weights, symbols, mode, thought, decision_ph) -> None:
+def _decision(weights, symbols, mode, step_state, agent_name, decision_ph) -> None:
     with decision_ph.container():
         st.markdown("**Latest decision**")
         if mode == "multi_asset":
@@ -149,9 +174,28 @@ def _decision(weights, symbols, mode, thought, decision_ph) -> None:
             lines = [f"- **{symbols[i]}** → {weights[i]:.1%}" for i in order if weights[i] > 1e-4]
             st.markdown("\n".join(lines) if lines else "_All cash._")
         else:
+            cash = float(step_state.get("cash", 0.0))
             st.metric("Target weight", f"{float(weights[0]):.0%}")
-        if thought:
-            st.caption(thought)
+            st.caption(f"Cash ${cash:,.0f}")
+
+
+        if agent_name in engine.LLM_AGENTS and step_state.get("step", 0) > 0:
+            parse_ok = step_state.get("parse_ok")
+            actions = step_state.get("actions") or {}
+            if parse_ok is False:
+                st.warning("Parse failed — held positions (do-nothing).")
+            elif parse_ok is True:
+                st.caption("Parsed actions")
+                st.code(str(actions) if actions else "{}", language="json")
+            thought = step_state.get("thought")
+            if thought:
+                with st.expander("Rationale", expanded=False):
+                    st.text(thought)
+        else:
+            thought = step_state.get("thought")
+            if thought:
+                st.caption(thought)
+
 
 
 def _render_evaluation(run: dict) -> None:
@@ -183,6 +227,22 @@ def _render_evaluation(run: dict) -> None:
         st.markdown("**Final allocation**")
         _final_allocation(run)
         st.caption(f"Turnover: {turnover:.2f}x · Final equity: ${equity[-1]:,.0f}")
+
+    thoughts = run.get("thoughts") or []
+    if any(t for t in thoughts):
+        st.subheader("Agent reasoning")
+        parse_oks = run.get("parse_oks") or []
+        llm_actions = run.get("llm_actions") or []
+        n = len(thoughts)
+        step = st.slider("Step", 0, max(n - 1, 0), 0, key="live_eval_thoughts")
+        if step < len(parse_oks) and parse_oks[step] is False:
+            st.warning("Parse failed on this step — held.")
+        if step < len(llm_actions) and llm_actions[step] is not None:
+            st.code(str(llm_actions[step]), language="json")
+        if thoughts[step]:
+            st.text(thoughts[step])
+        else:
+            st.caption("No reasoning recorded for this step.")
 
 
 def _drawdown_chart(equity) -> None:

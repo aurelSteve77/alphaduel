@@ -21,21 +21,26 @@ def render() -> None:
     st.write(
         "A reproducible arena where quantitative and language-model agents trade the same "
         "market under identical costs, execution rules and risk-adjusted rewards. "
-        "Everything below runs on **mock data** — no market access required."
+        "Everything below runs on **real market data** (yfinance, Parquet-cached). "
+        "Baselines, GenPortfolio and **LLM Vanilla** (Ollama) share the same environment."
     )
 
     st.divider()
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2, c3, c4 = st.columns(4)
     with c1.container(border=True):
         st.markdown("### ⚙️ Configure")
-        st.caption("Design the experiment: universe, market regime, costs and reward.")
+        st.caption("Design the experiment: universe, costs and reward.")
         _link("configure", "Open configuration", "⚙️")
     with c2.container(border=True):
+        st.markdown("### 📦 Data")
+        st.caption("Download prices / macro and manage the Parquet cache.")
+        _link("data", "Manage data", "📦")
+    with c3.container(border=True):
         st.markdown("### 🎬 Live run")
         st.caption("Pick an agent, tune it, and watch its decisions step by step.")
         _link("live", "Launch a live run", "🎬")
-    with c3.container(border=True):
+    with c4.container(border=True):
         st.markdown("### 📊 Analyze")
         st.caption("Compare every agent: equity, drawdown and a risk-adjusted leaderboard.")
         _link("overview", "Open overview", "📊")

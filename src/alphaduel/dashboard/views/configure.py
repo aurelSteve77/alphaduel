@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import streamlit as st
 
-from alphaduel.dashboard import engine, state
-from alphaduel.dashboard.components import theme
+from alphaduel.dashboard import engine, real_data, state
+from alphaduel.dashboard.components import agent_config, theme
 
 
 def render() -> None:
@@ -32,41 +32,71 @@ def render() -> None:
     )
     mode = "multi_asset" if mode_label.startswith("Multi") else "single_asset"
 
+    universe = real_data.universe_symbols(mode)
     n_assets = params["n_assets"]
     if mode == "multi_asset":
-        n_assets = st.slider("Number of assets", 2, 8, int(n_assets))
+        max_assets = len(universe)
+        n_assets = st.slider("Number of assets", 2, max_assets, min(int(n_assets), max_assets))
+        selected = universe[:n_assets]
+        st.caption("Symbols: " + ", ".join(selected))
+    else:
+        n_assets = 1
+        st.caption(f"Symbol: {universe[0]}")
 
     available = engine.agents_for(mode)
-    prev = [a for a in params["agent_names"] if a in available] or available
+    prev = [a for a in params["agent_names"] if a in available] or engine.baseline_agents(mode)
     agent_names = st.multiselect(
         "Agents to benchmark", options=available, default=prev, format_func=theme.label
     )
+    if any(a in engine.LLM_AGENTS for a in agent_names):
+        st.info(
+            "LLM Vanilla needs Ollama (`uv sync --extra llm`). "
+            "Benchmarks with it are slower — prefer Live run for interactive trials."
+        )
 
-    st.subheader("Market regime")
-    c1, c2, c3 = st.columns(3)
-    n_steps = c1.slider("History (days)", 250, 1500, int(params["n_steps"]), step=50)
-    drift = c2.slider("Daily drift (bps)", -5.0, 10.0, params["drift"] * 1e4, step=0.5) / 1e4
-    vol = c3.slider("Daily volatility (%)", 0.5, 3.0, params["vol"] * 100, step=0.1) / 100.0
+    st.subheader("Market window")
+    n_steps = st.slider(
+        "Use last N trading days", 250, 1500, int(params["n_steps"]), step=50
+    )
+    st.caption(
+        "Prices come from yfinance (cached under `data_cache/`). "
+        "Or use the **Data** page to download / refresh the cache."
+    )
 
     st.subheader("Episodes")
     c4, c5, c6 = st.columns(3)
-    episode_length = c4.slider("Episode length (days)", 30, 250, int(params["episode_length"]),
-                               step=10)
+    episode_length = c4.slider(
+        "Episode length (days)", 30, 250, int(params["episode_length"]), step=10
+    )
     n_episodes = c5.slider("Episodes (for stats)", 1, 50, int(params["n_episodes"]))
     seed = c6.number_input("Seed", 0, 9999, int(params["seed"]))
 
     st.subheader("Costs & reward")
     c7, c8, c9, c10 = st.columns(4)
-    initial_cash = c7.number_input("Initial cash", 1_000.0, value=float(params["initial_cash"]),
-                                   step=1_000.0)
-    commission_bps = c8.slider("Commission (bps)", 0.0, 10.0, float(params["commission_bps"]),
-                               step=0.5)
-    half_spread_bps = c9.slider("Half spread (bps)", 0.0, 10.0, float(params["half_spread_bps"]),
-                                step=0.5)
+    initial_cash = c7.number_input(
+        "Initial cash", 1_000.0, value=float(params["initial_cash"]), step=1_000.0
+    )
+    commission_bps = c8.slider(
+        "Commission (bps)", 0.0, 10.0, float(params["commission_bps"]), step=0.5
+    )
+    half_spread_bps = c9.slider(
+        "Half spread (bps)", 0.0, 10.0, float(params["half_spread_bps"]), step=0.5
+    )
     reward_kind = c10.selectbox(
-        "Reward", ["log_return", "differential_sharpe", "terminal_pnl"],
+        "Reward",
+        ["log_return", "differential_sharpe", "terminal_pnl"],
         index=["log_return", "differential_sharpe", "terminal_pnl"].index(params["reward_kind"]),
     )
+
+    llm_flat = {k: params.get(k, v) for k, v in engine.default_llm_params().items()}
+    if any(a in engine.LLM_AGENTS for a in agent_names) or st.checkbox(
+        "Show LLM settings",
+        value=any(a in engine.LLM_AGENTS for a in agent_names),
+        key="cfg_show_llm",
+    ):
+        st.subheader("LLM (Vanilla)")
+        nested = agent_config.render_llm_settings(llm_flat, key="cfg_llm")
+        llm_flat = agent_config.flatten_llm_params(nested)
 
     st.session_state["params"] = {
         "mode": mode,
@@ -80,8 +110,8 @@ def render() -> None:
         "commission_bps": float(commission_bps),
         "half_spread_bps": float(half_spread_bps),
         "reward_kind": reward_kind,
-        "drift": float(drift),
-        "vol": float(vol),
+        "use_mock": False,
+        **llm_flat,
     }
 
     st.divider()
@@ -113,4 +143,3 @@ def render() -> None:
     overview = st.session_state.get("_pages", {}).get("overview")
     if overview is not None:
         st.page_link(overview, label="Go to Overview", icon="📊")
-

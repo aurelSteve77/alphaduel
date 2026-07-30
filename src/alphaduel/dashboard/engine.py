@@ -1,4 +1,4 @@
-"""Dashboard engine: build a mock env, run agents, and collect rich per-step records.
+"""Dashboard engine: build a real-data env, run agents, and collect rich per-step records.
 
 The single public entry point :func:`run_benchmark` takes only primitives so it can be
 cached by Streamlit. It returns plain arrays/dicts ready for the UI components.
@@ -12,26 +12,56 @@ import numpy as np
 
 from alphaduel.agents.registry import build_agent
 from alphaduel.config.schema import AgentConfig, CostConfig, EnvConfig, RewardConfig
-from alphaduel.dashboard import mock_data
+from alphaduel.dashboard import mock_data, real_data
 from alphaduel.envs.alphaduel_gym import AlphaDuelGym
 from alphaduel.envs.multi_asset_gym import MultiAssetGym
 from alphaduel.evaluation.metrics import compute_metrics
 
-SINGLE_AGENTS = ["buy_and_hold", "momentum", "mean_reversion", "volatility_target", "random"]
-MULTI_AGENTS = ["equal_weight", "inverse_volatility", "random_weights", "genportfolio"]
+SINGLE_AGENTS = [
+    "buy_and_hold",
+    "momentum",
+    "mean_reversion",
+    "volatility_target",
+    "random",
+    "llm_vanilla",
+]
+MULTI_AGENTS = [
+    "equal_weight",
+    "inverse_volatility",
+    "random_weights",
+    "genportfolio",
+    "llm_vanilla",
+]
+LLM_AGENTS = frozenset({"llm_vanilla"})
 _NEEDS_SEED = {"random", "random_weights"}
 _GENERATIVE = {"genportfolio"}
+
+_DEFAULT_LLM = {
+    "llm_provider": "ollama",
+    "llm_model": "qwen3.5:2b",
+    "llm_temperature": 0.0,
+    "llm_reasoning": False,
+    "llm_use_memory": False,
+    "llm_max_memory_turns": 8,
+    "llm_system_prompt_key": "base_agent_system",
+    "llm_user_prompt_key": "base_agent_user",
+}
 
 
 def agents_for(mode: str) -> list[str]:
     return MULTI_AGENTS if mode == "multi_asset" else SINGLE_AGENTS
 
 
+def baseline_agents(mode: str) -> list[str]:
+    """Agents safe to run without an LLM backend (used as dashboard defaults)."""
+    return [a for a in agents_for(mode) if a not in LLM_AGENTS]
+
+
 def default_params() -> dict:
     """Default experiment configuration shared by every dashboard page."""
     return {
         "mode": "multi_asset",
-        "agent_names": tuple(MULTI_AGENTS),
+        "agent_names": tuple(baseline_agents("multi_asset")),
         "n_assets": 4,
         "n_steps": 500,
         "episode_length": 120,
@@ -41,9 +71,13 @@ def default_params() -> dict:
         "commission_bps": 1.0,
         "half_spread_bps": 2.0,
         "reward_kind": "log_return",
-        "drift": 0.0004,
-        "vol": 0.012,
+        "use_mock": False,
+        **_DEFAULT_LLM,
     }
+
+
+def default_llm_params() -> dict:
+    return dict(_DEFAULT_LLM)
 
 
 @dataclass
@@ -57,6 +91,8 @@ class AgentRecord:
     costs: np.ndarray
     thoughts: list[str | None]
     metrics: dict[str, float]       # mean over episodes
+    parse_oks: list[bool | None] = field(default_factory=list)
+    llm_actions: list[dict | None] = field(default_factory=list)
 
 
 @dataclass
@@ -75,10 +111,35 @@ def _build_env(mode: str, panel, env_cfg: EnvConfig, seed: int):
 
 
 def _kind_of(name: str) -> str:
-    return "generative" if name in _GENERATIVE else "baseline"
+    if name in LLM_AGENTS:
+        return "llm"
+    if name in _GENERATIVE:
+        return "generative"
+    return "baseline"
 
 
-def _make_agent(name: str, seed: int):
+def _llm_agent_params(params: dict) -> dict:
+    """Map dashboard LLM settings → VanillaLLMAgent / resolve_llm params."""
+    return {
+        "llm": {
+            "provider": params.get("llm_provider", "ollama"),
+            "model": params.get("llm_model", "qwen3.5:2b"),
+            "temperature": float(params.get("llm_temperature", 0.0)),
+            "reasoning": bool(params.get("llm_reasoning", False)),
+        },
+        "use_memory": bool(params.get("llm_use_memory", False)),
+        "max_memory_turns": int(params.get("llm_max_memory_turns", 8)),
+        "system_prompt_key": params.get("llm_system_prompt_key", "base_agent_system"),
+        "user_prompt_key": params.get("llm_user_prompt_key", "base_agent_user"),
+    }
+
+
+def _make_agent(name: str, seed: int, dash_params: dict | None = None):
+    dash_params = dash_params or {}
+    if name in LLM_AGENTS:
+        return build_agent(
+            AgentConfig(name=name, kind="llm", params=_llm_agent_params(dash_params))
+        )
     params = {"seed": seed} if name in _NEEDS_SEED else {}
     return build_agent(AgentConfig(name=name, kind=_kind_of(name), params=params))
 
@@ -88,16 +149,24 @@ def build_named_agent(name: str, params: dict | None = None):
     return build_agent(AgentConfig(name=name, kind=_kind_of(name), params=params or {}))
 
 
+def get_panel(params: dict):
+    """Build the market panel for the current dashboard params (real or mock)."""
+    return _panel_for(params)
+
+
 def _panel_for(params: dict):
-    if params["mode"] == "multi_asset":
-        panel = mock_data.make_multi_panel(
-            params["n_steps"], params["n_assets"], params["drift"], params["vol"], params["seed"]
-        )
-        return panel, panel.symbols
-    panel = mock_data.make_single_panel(
-        params["n_steps"], params["drift"], params["vol"], params["seed"]
-    )
-    return panel, ["ASSET"]
+    if params.get("use_mock"):
+        drift = float(params.get("drift", 0.0004))
+        vol = float(params.get("vol", 0.012))
+        seed = int(params.get("seed", 7))
+        if params["mode"] == "multi_asset":
+            panel = mock_data.make_multi_panel(
+                params["n_steps"], params["n_assets"], drift, vol, seed
+            )
+            return panel, panel.symbols
+        panel = mock_data.make_single_panel(params["n_steps"], drift, vol, seed)
+        return panel, list(panel.symbols)
+    return real_data.load_panel(params["mode"], params["n_assets"], params["n_steps"])
 
 
 def _env_config(params: dict) -> EnvConfig:
@@ -116,6 +185,9 @@ def make_live_session(params: dict, agent_name: str, agent_params: dict):
     """Build (env, agent, n_assets, symbols) ready for :func:`stream_episode`."""
     panel, symbols = _panel_for(params)
     env = _build_env(params["mode"], panel, _env_config(params), params["seed"])
+    # Live page may already nest llm={...}; otherwise fall back to dashboard LLM settings.
+    if agent_name in LLM_AGENTS and "llm" not in agent_params:
+        agent_params = {**_llm_agent_params(params), **agent_params}
     agent = build_named_agent(agent_name, agent_params)
     if agent_name in _GENERATIVE:
         agent.train(env)
@@ -152,6 +224,8 @@ def stream_episode(env, agent, n_assets: int, seed: int | None = None):
     fills: list[int] = []
     costs: list[float] = []
     thoughts: list[str | None] = []
+    parse_oks: list[bool | None] = []
+    llm_actions: list[dict | None] = []
 
     def _state(done: bool, step: int) -> dict:
         return {
@@ -166,9 +240,13 @@ def stream_episode(env, agent, n_assets: int, seed: int | None = None):
             "fills": fills,
             "costs": costs,
             "thoughts": thoughts,
+            "parse_oks": parse_oks,
+            "llm_actions": llm_actions,
             "current_weights": weights[-1] if weights else _weights_from_info(info, n_assets),
             "cash": float(info["cash"]),
             "thought": thoughts[-1] if thoughts else None,
+            "parse_ok": parse_oks[-1] if parse_oks else None,
+            "actions": llm_actions[-1] if llm_actions else None,
         }
 
     yield _state(False, 0)
@@ -189,6 +267,9 @@ def stream_episode(env, agent, n_assets: int, seed: int | None = None):
         fills.append(int(info["fill_shares"]))
         costs.append(float(info["fill_cost"]))
         thoughts.append(getattr(agent, "last_thoughts", None))
+        parse_oks.append(getattr(agent, "last_parse_ok", None))
+        raw_actions = getattr(agent, "last_actions", None)
+        llm_actions.append(dict(raw_actions) if raw_actions else None)
         yield _state(done, step)
 
 
@@ -205,6 +286,8 @@ def _run_episode(env, agent, n_assets: int, seed: int) -> dict:
         "fills": np.asarray(last["fills"], dtype=int),
         "costs": np.asarray(last["costs"]),
         "thoughts": last["thoughts"],
+        "parse_oks": last["parse_oks"],
+        "llm_actions": last["llm_actions"],
         "prices": np.vstack(last["prices"]),
     }
 
@@ -221,15 +304,29 @@ def run_benchmark(
     commission_bps: float = 1.0,
     half_spread_bps: float = 2.0,
     reward_kind: str = "log_return",
+    use_mock: bool = False,
     drift: float = 0.0004,
     vol: float = 0.012,
+    llm_provider: str = "ollama",
+    llm_model: str = "qwen3.5:2b",
+    llm_temperature: float = 0.0,
+    llm_reasoning: bool = False,
+    llm_use_memory: bool = False,
+    llm_max_memory_turns: int = 8,
+    llm_system_prompt_key: str = "base_agent_system",
+    llm_user_prompt_key: str = "base_agent_user",
 ) -> BenchmarkResult:
-    """Run every named agent over a mock market and return per-step + aggregate results."""
+    """Run every named agent over a real (or mock) market and return per-step + aggregate results."""
     params = {
         "mode": mode, "n_assets": n_assets, "n_steps": n_steps,
         "episode_length": episode_length, "seed": seed, "initial_cash": initial_cash,
         "commission_bps": commission_bps, "half_spread_bps": half_spread_bps,
-        "reward_kind": reward_kind, "drift": drift, "vol": vol,
+        "reward_kind": reward_kind, "use_mock": use_mock, "drift": drift, "vol": vol,
+        "llm_provider": llm_provider, "llm_model": llm_model,
+        "llm_temperature": llm_temperature, "llm_reasoning": llm_reasoning,
+        "llm_use_memory": llm_use_memory, "llm_max_memory_turns": llm_max_memory_turns,
+        "llm_system_prompt_key": llm_system_prompt_key,
+        "llm_user_prompt_key": llm_user_prompt_key,
     }
     panel, symbols = _panel_for(params)
     n = len(symbols)
@@ -237,7 +334,7 @@ def run_benchmark(
 
     result = BenchmarkResult(mode=mode, symbols=symbols, timestamps=[], prices=np.empty(0))
     for name in agent_names:
-        agent = _make_agent(name, seed)
+        agent = _make_agent(name, seed, params)
         if name in _GENERATIVE:
             agent.train(env)
 
@@ -255,6 +352,8 @@ def run_benchmark(
             costs=replay["costs"],
             thoughts=replay["thoughts"],
             metrics=metrics,
+            parse_oks=replay["parse_oks"],
+            llm_actions=replay["llm_actions"],
         )
         if not result.timestamps:
             result.timestamps = replay["timestamps"]

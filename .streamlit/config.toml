@@ -1,5 +1,7 @@
 [server]
 enableStaticServing = true
+# Avoid Streamlit probing optional HF vision deps (torchvision) if transformers is installed.
+fileWatcherType = "poll"
 
 [theme]
 primaryColor = "#bb5a38"

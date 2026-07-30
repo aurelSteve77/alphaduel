@@ -37,3 +37,68 @@ class ParquetCache:
         path = self._key(namespace, params)
         df.to_parquet(path, index=True)
         return path
+
+    def delete(self, namespace: str, params: dict) -> bool:
+        """Remove one cached entry. Returns True if a file was deleted."""
+        path = self._key(namespace, params)
+        if path.exists():
+            path.unlink()
+            return True
+        return False
+
+    def clear_namespace(self, namespace: str) -> int:
+        """Delete every parquet under ``namespace``. Returns number of files removed."""
+        ns_dir = self.root / namespace
+        if not ns_dir.exists():
+            return 0
+        removed = 0
+        for path in ns_dir.glob("*.parquet"):
+            path.unlink()
+            removed += 1
+        return removed
+
+    def clear_all(self) -> int:
+        """Delete every parquet under the cache root. Returns number of files removed."""
+        removed = 0
+        for path in self.root.glob("*/*.parquet"):
+            path.unlink()
+            removed += 1
+        return removed
+
+    def list_entries(self) -> list[dict]:
+        """Summarize cached parquet files for UI / diagnostics."""
+        entries: list[dict] = []
+        if not self.root.exists():
+            return entries
+        for path in sorted(self.root.glob("*/*.parquet")):
+            stat = path.stat()
+            info: dict = {
+                "namespace": path.parent.name,
+                "file": path.name,
+                "path": str(path),
+                "bytes": stat.st_size,
+                "modified": pd.Timestamp(stat.st_mtime, unit="s", tz="UTC"),
+                "rows": None,
+                "symbols": None,
+                "start": None,
+                "end": None,
+            }
+            try:
+                df = pd.read_parquet(path)
+                info["rows"] = len(df)
+                if "symbol" in df.columns:
+                    info["symbols"] = sorted(df["symbol"].astype(str).unique().tolist())
+                ts_col = "timestamp" if "timestamp" in df.columns else None
+                if ts_col is None and isinstance(df.index, pd.DatetimeIndex):
+                    ts = df.index
+                elif ts_col is not None:
+                    ts = pd.to_datetime(df[ts_col], utc=True)
+                else:
+                    ts = None
+                if ts is not None and len(ts) > 0:
+                    info["start"] = pd.Timestamp(ts.min())
+                    info["end"] = pd.Timestamp(ts.max())
+            except Exception:  # noqa: BLE001 — corrupt cache rows still show as files
+                pass
+            entries.append(info)
+        return entries

@@ -125,12 +125,20 @@ class AlphaDuelGym(gym.Env):
 
     def _info(self, fill_shares: int, fill_cost: float) -> dict:
         price = float(self.panel.close[self.t])
+        symbol = getattr(self.panel, "symbol", None) or "ASSET"
+        eq = self.portfolio.equity(price)
+        weight = (self.portfolio.shares * price) / eq if eq > 0 else 0.0
         return {
             "timestamp": self.panel.timestamps[self.t],
-            "equity": self.portfolio.equity(price),
+            "equity": eq,
             "cash": self.portfolio.cash,
             "shares": self.portfolio.shares,
             "price": price,
+            "prices": np.array([price], dtype=np.float64),
+            "symbols": [symbol],
+            "weights": np.array([weight], dtype=np.float32),
+            "asset_features": self.panel.features[self.t].reshape(1, -1),
+            "feature_names": list(self.panel.feature_names),
             "fill_shares": fill_shares,
             "fill_cost": fill_cost,
         }

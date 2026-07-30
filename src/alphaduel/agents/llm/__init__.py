@@ -1,7 +1,10 @@
-"""LLM agents (P2/P3).
+"""LLM agents (P2): off-the-shelf vanilla strategy with injected chat models.
 
-Renders the env observation to a textual market brief, asks an LLM for a structured
-action (JSON) plus a rationale, and caches responses by (obs-hash, model, prompt).
+Build the model with :class:`LLMHandler` / :func:`create_llm`, then pass it to
+:class:`VanillaLLMAgent`. Renders the env observation to a textual market brief,
+asks the LLM for free-form reasoning plus a fenced JSON share-delta action, and
+stores the rationale in ``last_thoughts``. Set ``last_parse_ok=False`` on parse
+failure (treated as hold).
 
 LEAKAGE NOTE: off-the-shelf LLMs may have memorized the future. Evaluate primarily on
 data after the model's training cutoff, and/or enable entity-masking. See SPEC ยง4.1.
@@ -9,21 +12,13 @@ data after the model's training cutoff, and/or enable entity-masking. See SPEC ย
 
 from __future__ import annotations
 
-import numpy as np
+from alphaduel.agents.llm.factory import LLMHandler, create_llm, resolve_llm
+from alphaduel.agents.llm.vanilla import OffShelfLLMAgent, VanillaLLMAgent
 
-from alphaduel.agents.base import Agent
-
-
-class OffShelfLLMAgent(Agent):
-    name = "llm_offshelf"
-
-    def __init__(self, model: str = "gpt-4o-mini", prompt_version: str = "v1", **params) -> None:
-        self.model = model
-        self.prompt_version = prompt_version
-        self.params = params
-
-    def act(self, observation: np.ndarray, info: dict) -> np.ndarray:
-        raise NotImplementedError(
-            "LLM agent is scheduled for Phase 2: render observation -> brief, call model, "
-            "parse JSON action + thoughts (stored in `last_thoughts`), cache by obs-hash."
-        )
+__all__ = [
+    "LLMHandler",
+    "OffShelfLLMAgent",
+    "VanillaLLMAgent",
+    "create_llm",
+    "resolve_llm",
+]

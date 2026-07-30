@@ -1,0 +1,5 @@
+Here is the current market state for symbols: {{ symbols | join(', ') }}.
+
+{{ market_state }}
+
+Write your analysis, then end with a fenced JSON actions block.

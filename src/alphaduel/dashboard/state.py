@@ -16,10 +16,18 @@ def ensure_params() -> dict:
     """Seed default experiment params on first load and return the current params."""
     if "params" not in st.session_state:
         st.session_state["params"] = engine.default_params()
+    else:
+        # Migrate older mock-era sessions / presets toward real data + LLM defaults.
+        params = st.session_state["params"]
+        params.setdefault("use_mock", False)
+        params.pop("drift", None)
+        params.pop("vol", None)
+        for key, value in engine.default_llm_params().items():
+            params.setdefault(key, value)
     return st.session_state["params"]
 
 
-@st.cache_data(show_spinner="Running benchmark on mock market...")
+@st.cache_data(show_spinner="Running benchmark (LLM agents call Ollama when selected)...")
 def _run(params: dict) -> engine.BenchmarkResult:
     return engine.run_benchmark(**params)
 
@@ -39,6 +47,11 @@ def _coerce(params: dict) -> dict:
     params = dict(params)
     if "agent_names" in params:
         params["agent_names"] = tuple(params["agent_names"])
+    params.setdefault("use_mock", False)
+    params.pop("drift", None)
+    params.pop("vol", None)
+    for key, value in engine.default_llm_params().items():
+        params.setdefault(key, value)
     return params
 
 
@@ -46,15 +59,26 @@ def _builtin_presets() -> dict[str, dict]:
     balanced = engine.default_params()
     momentum = engine.default_params()
     momentum.update(
-        mode="single_asset", agent_names=tuple(engine.SINGLE_AGENTS), n_assets=1,
+        mode="single_asset",
+        agent_names=tuple(engine.baseline_agents("single_asset")),
+        n_assets=1,
         episode_length=90,
     )
     stress = engine.default_params()
-    stress.update(commission_bps=5.0, half_spread_bps=6.0, vol=0.02, episode_length=90)
+    stress.update(commission_bps=5.0, half_spread_bps=6.0, episode_length=90)
+    llm_live = engine.default_params()
+    llm_live.update(
+        agent_names=("llm_vanilla",),
+        n_episodes=3,
+        episode_length=40,
+        llm_use_memory=False,
+        llm_reasoning=False,
+    )
     return {
         "Balanced multi-asset": balanced,
         "Single-asset trend": momentum,
         "High-cost stress test": stress,
+        "LLM vanilla (short)": llm_live,
     }
 
 

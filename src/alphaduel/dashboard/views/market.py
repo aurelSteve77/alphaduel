@@ -1,32 +1,31 @@
-"""Market page: preview the synthetic (mock) price paths and features."""
+"""Market page: preview real cached price paths and features."""
 
 from __future__ import annotations
 
 import plotly.graph_objects as go
 import streamlit as st
 
-from alphaduel.dashboard import mock_data, state
+from alphaduel.dashboard import engine, real_data, state
 from alphaduel.dashboard.components import theme
 
 
 def render() -> None:
-    st.title("Market — mock data")
-    st.caption("Synthetic geometric-Brownian-motion prices; no real quotes are downloaded.")
+    st.title("Market — real data")
+    st.caption("yfinance prices from the Parquet cache (same path as `alphaduel run`).")
 
     params = state.ensure_params()
 
-    if params["mode"] == "multi_asset":
-        panel = mock_data.make_multi_panel(
-            params["n_steps"], params["n_assets"], params["drift"], params["vol"], params["seed"]
+    try:
+        panel, symbols = engine.get_panel(params)
+    except Exception as exc:  # noqa: BLE001 — surface cache/download errors in the UI
+        st.error(
+            f"Could not load market data: {exc}\n\n"
+            "Open the **Data** page to download a universe, or run:\n"
+            "`uv run alphaduel download -c configs/experiment/p5_genportfolio.yaml`"
         )
-        symbols = panel.symbols
-        close = panel.close
-    else:
-        panel = mock_data.make_single_panel(
-            params["n_steps"], params["drift"], params["vol"], params["seed"]
-        )
-        symbols = ["ASSET"]
-        close = panel.close.reshape(-1, 1)
+        return
+
+    close = panel.close if params["mode"] == "multi_asset" else panel.close.reshape(-1, 1)
 
     colors = theme.color_map(symbols)
     fig = go.Figure()
@@ -56,3 +55,4 @@ def render() -> None:
     c2.metric("History (days)", panel.n_steps)
     c3.metric("Features / asset", panel.n_features)
     st.caption("Features: " + ", ".join(panel.feature_names))
+    st.caption("Universe config: " + str(real_data.config_path_for(params["mode"]).name))

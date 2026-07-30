@@ -1,0 +1,18 @@
+# Vanilla off-the-shelf LLM agent (chat model injected via LLMHandler).
+# Requires: uv sync --extra llm  and a running Ollama daemon with the model pulled.
+agents:
+  - name: llm_vanilla
+    kind: llm
+    params:
+      # Built by alphaduel.agents.llm.resolve_llm / LLMHandler.create
+      llm:
+        provider: ollama
+        model: "qwen3.5:2b"
+        temperature: 0.0
+        reasoning: false
+      use_memory: false
+      max_memory_turns: 8
+      system_prompt_key: base_agent_system
+      user_prompt_key: base_agent_user
+      # symbols: null  # defaults to env info["symbols"] (or ["ASSET"] for single-asset)
+      allow_short: false
