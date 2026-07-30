@@ -9,7 +9,16 @@ from __future__ import annotations
 import streamlit as st
 
 from alphaduel.dashboard import state
-from alphaduel.dashboard.views import agent_detail, configure, data, home, live, market, overview
+from alphaduel.dashboard.views import (
+    agent_detail,
+    configure,
+    data,
+    evaluate,
+    home,
+    live,
+    market,
+    overview,
+)
 
 
 def _sidebar_status() -> None:
@@ -34,6 +43,9 @@ def main() -> None:
         ),
         "data": st.Page(data.render, title="Data", icon="📦", url_path="data"),
         "live": st.Page(live.render, title="Live run", icon="🎬", url_path="live"),
+        "evaluate": st.Page(
+            evaluate.render, title="Evaluate", icon="🏁", url_path="evaluate"
+        ),
         "overview": st.Page(overview.render, title="Overview", icon="📊", url_path="overview"),
         "agent": st.Page(agent_detail.render, title="Agent detail", icon="🔍", url_path="agent"),
         "market": st.Page(market.render, title="Market", icon="📈", url_path="market"),
@@ -44,7 +56,7 @@ def main() -> None:
         {
             "": [pages["home"]],
             "Setup": [pages["configure"], pages["data"], pages["live"]],
-            "Analyze": [pages["overview"], pages["agent"], pages["market"]],
+            "Analyze": [pages["evaluate"], pages["overview"], pages["agent"], pages["market"]],
         }
     )
     _sidebar_status()

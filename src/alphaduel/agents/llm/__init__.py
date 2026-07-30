@@ -12,12 +12,22 @@ data after the model's training cutoff, and/or enable entity-masking. See SPEC Â
 
 from __future__ import annotations
 
-from alphaduel.agents.llm.factory import LLMHandler, create_llm, resolve_llm
+from alphaduel.agents.llm.factory import (
+    DEFAULT_MODELS,
+    DEFAULT_OPENAI_REASONING_EFFORT,
+    LLMHandler,
+    SUPPORTED_PROVIDERS,
+    create_llm,
+    resolve_llm,
+)
 from alphaduel.agents.llm.vanilla import OffShelfLLMAgent, VanillaLLMAgent
 
 __all__ = [
+    "DEFAULT_MODELS",
+    "DEFAULT_OPENAI_REASONING_EFFORT",
     "LLMHandler",
     "OffShelfLLMAgent",
+    "SUPPORTED_PROVIDERS",
     "VanillaLLMAgent",
     "create_llm",
     "resolve_llm",

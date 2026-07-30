@@ -190,6 +190,80 @@ def test_resolve_llm_from_nested_config(monkeypatch):
     assert isinstance(llm, _FakeLLM)
 
 
+def test_factory_routes_replicate(monkeypatch):
+    from alphaduel.agents.llm import factory as factory_mod
+
+    captured: dict = {}
+
+    def _fake_replicate(name, *, temperature, **kwargs):
+        captured.update(name=name, temperature=temperature, **kwargs)
+        return _FakeLLM("replicate")
+
+    monkeypatch.setattr(factory_mod.LLMHandler, "_create_replicate", staticmethod(_fake_replicate))
+    llm = factory_mod.LLMHandler.create(
+        "meta/meta-llama-3-8b-instruct",
+        provider="replicate",
+        temperature=0.2,
+    )
+    assert isinstance(llm, _FakeLLM)
+    assert captured["name"] == "meta/meta-llama-3-8b-instruct"
+    assert captured["temperature"] == 0.2
+
+
+def test_factory_routes_openai(monkeypatch):
+    from alphaduel.agents.llm import factory as factory_mod
+
+    captured: dict = {}
+
+    def _fake_openai(name, *, temperature, **kwargs):
+        captured.update(name=name, temperature=temperature, **kwargs)
+        return _FakeLLM("openai")
+
+    monkeypatch.setattr(factory_mod.LLMHandler, "_create_openai", staticmethod(_fake_openai))
+    llm = factory_mod.LLMHandler.create(
+        "gpt-5.4-mini",
+        provider="openai",
+        temperature=0.0,
+        api_key="sk-test",
+    )
+    assert isinstance(llm, _FakeLLM)
+    assert captured["name"] == "gpt-5.4-mini"
+    assert captured["api_key"] == "sk-test"
+
+
+def test_openai_defaults_reasoning_effort_low(monkeypatch):
+    from alphaduel.agents.llm import factory as factory_mod
+
+    captured: dict = {}
+
+    class _FakeChatOpenAI:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    import sys
+    from types import ModuleType
+
+    mod = ModuleType("langchain_openai")
+    mod.ChatOpenAI = _FakeChatOpenAI
+    monkeypatch.setitem(sys.modules, "langchain_openai", mod)
+
+    factory_mod.LLMHandler.create("gpt-5.4-mini", provider="openai", temperature=0.0)
+    assert captured.get("reasoning_effort") == "low"
+
+    captured.clear()
+    factory_mod.LLMHandler.create(
+        "gpt-5.4-mini", provider="openai", temperature=0.0, reasoning_effort="high"
+    )
+    assert captured.get("reasoning_effort") == "high"
+
+
+def test_factory_rejects_unknown_provider():
+    from alphaduel.agents.llm.factory import LLMHandler
+
+    with pytest.raises(ValueError, match="Unknown LLM provider"):
+        LLMHandler.create("x", provider="nope")
+
+
 def test_vanilla_agent_requires_llm():
     with pytest.raises(TypeError, match="llm"):
         VanillaLLMAgent(llm=None)  # type: ignore[arg-type]

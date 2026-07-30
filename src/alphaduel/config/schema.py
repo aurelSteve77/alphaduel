@@ -23,6 +23,7 @@ class Secrets(BaseSettings):
     tiingo_api_key: str | None = Field(default=None, alias="TIINGO_API_KEY")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
     hf_token: str | None = Field(default=None, alias="HF_TOKEN")
+    replicate_api_token: str | None = Field(default=None, alias="REPLICATE_API_TOKEN")
     mlflow_tracking_uri: str = Field(default="file:./mlruns", alias="MLFLOW_TRACKING_URI")
     mlflow_experiment_name: str = Field(default="alphaduel", alias="MLFLOW_EXPERIMENT_NAME")
     data_dir: str = Field(default="./data_cache", alias="ALPHADUEL_DATA_DIR")

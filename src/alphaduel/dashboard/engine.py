@@ -6,7 +6,9 @@ cached by Streamlit. It returns plain arrays/dicts ready for the UI components.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import threading
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from dataclasses import asdict, dataclass, field
 
 import numpy as np
 
@@ -16,6 +18,9 @@ from alphaduel.dashboard import mock_data, real_data
 from alphaduel.envs.alphaduel_gym import AlphaDuelGym
 from alphaduel.envs.multi_asset_gym import MultiAssetGym
 from alphaduel.evaluation.metrics import compute_metrics
+
+# Cap concurrent contestant workers (LLM calls are I/O-bound; keep Ollama/API load sane).
+EVAL_MAX_WORKERS = 3
 
 SINGLE_AGENTS = [
     "buy_and_hold",
@@ -41,6 +46,7 @@ _DEFAULT_LLM = {
     "llm_model": "qwen3.5:2b",
     "llm_temperature": 0.0,
     "llm_reasoning": False,
+    "llm_reasoning_effort": "low",
     "llm_use_memory": False,
     "llm_max_memory_turns": 8,
     "llm_system_prompt_key": "base_agent_system",
@@ -93,6 +99,7 @@ class AgentRecord:
     metrics: dict[str, float]       # mean over episodes
     parse_oks: list[bool | None] = field(default_factory=list)
     llm_actions: list[dict | None] = field(default_factory=list)
+    episode_metrics: list[dict[str, float]] = field(default_factory=list)
 
 
 @dataclass
@@ -126,6 +133,7 @@ def _llm_agent_params(params: dict) -> dict:
             "model": params.get("llm_model", "qwen3.5:2b"),
             "temperature": float(params.get("llm_temperature", 0.0)),
             "reasoning": bool(params.get("llm_reasoning", False)),
+            "reasoning_effort": params.get("llm_reasoning_effort", "low"),
         },
         "use_memory": bool(params.get("llm_use_memory", False)),
         "max_memory_turns": int(params.get("llm_max_memory_turns", 8)),
@@ -273,10 +281,12 @@ def stream_episode(env, agent, n_assets: int, seed: int | None = None):
         yield _state(done, step)
 
 
-def _run_episode(env, agent, n_assets: int, seed: int) -> dict:
+def _run_episode(env, agent, n_assets: int, seed: int, on_step=None) -> dict:
     last: dict = {}
     for step_state in stream_episode(env, agent, n_assets, seed=seed):
         last = step_state
+        if on_step is not None:
+            on_step(int(step_state["step"]), bool(step_state["done"]))
     return {
         "timestamps": last["timestamps"],
         "equity": np.asarray(last["equity"]),
@@ -311,6 +321,7 @@ def run_benchmark(
     llm_model: str = "qwen3.5:2b",
     llm_temperature: float = 0.0,
     llm_reasoning: bool = False,
+    llm_reasoning_effort: str = "low",
     llm_use_memory: bool = False,
     llm_max_memory_turns: int = 8,
     llm_system_prompt_key: str = "base_agent_system",
@@ -324,6 +335,7 @@ def run_benchmark(
         "reward_kind": reward_kind, "use_mock": use_mock, "drift": drift, "vol": vol,
         "llm_provider": llm_provider, "llm_model": llm_model,
         "llm_temperature": llm_temperature, "llm_reasoning": llm_reasoning,
+        "llm_reasoning_effort": llm_reasoning_effort,
         "llm_use_memory": llm_use_memory, "llm_max_memory_turns": llm_max_memory_turns,
         "llm_system_prompt_key": llm_system_prompt_key,
         "llm_user_prompt_key": llm_user_prompt_key,
@@ -361,14 +373,336 @@ def run_benchmark(
     return result
 
 
-def _aggregate_metrics(episodes: list[dict], n_trials: int) -> dict[str, float]:
-    per_episode: dict[str, list[float]] = {}
+def _per_episode_metrics(episodes: list[dict], n_trials: int) -> list[dict[str, float]]:
+    out: list[dict[str, float]] = []
     for ep in episodes:
         n_tx = int((ep["fills"] != 0).sum())
-        m = compute_metrics(
-            ep["equity"], n_transactions=n_tx, total_reward=float(ep["rewards"].sum()),
-            n_trials=n_trials,
+        out.append(
+            compute_metrics(
+                ep["equity"],
+                n_transactions=n_tx,
+                total_reward=float(ep["rewards"].sum()),
+                n_trials=n_trials,
+            )
         )
-        for k, v in m.items():
-            per_episode.setdefault(k, []).append(v)
-    return {k: float(np.mean(v)) for k, v in per_episode.items()}
+    return out
+
+
+def _aggregate_metrics(episodes: list[dict], n_trials: int) -> dict[str, float]:
+    per_episode = _per_episode_metrics(episodes, n_trials)
+    if not per_episode:
+        return {}
+    keys = per_episode[0].keys()
+    return {k: float(np.mean([m[k] for m in per_episode])) for k in keys}
+
+
+def default_contestant_label(agent_name: str, params: dict | None = None) -> str:
+    """Human-readable label for a contestant (esp. LLM provider/model)."""
+    params = params or {}
+    if agent_name in LLM_AGENTS:
+        llm = params.get("llm") or {}
+        provider = llm.get("provider", "ollama")
+        model = llm.get("model", "qwen3.5:2b")
+        return f"LLM · {provider} · {model}"
+    return agent_name
+
+
+def _make_agent_from_spec(agent_name: str, seed: int, agent_params: dict | None = None):
+    """Build an agent from an evaluation contestant spec."""
+    agent_params = dict(agent_params or {})
+    if agent_name in LLM_AGENTS:
+        # Accept either nested live-style params or flat dashboard keys.
+        if "llm" not in agent_params:
+            agent_params = _llm_agent_params(agent_params)
+        return build_agent(AgentConfig(name=agent_name, kind="llm", params=agent_params))
+    if agent_name in _NEEDS_SEED and "seed" not in agent_params:
+        agent_params = {**agent_params, "seed": seed}
+    return build_agent(
+        AgentConfig(name=agent_name, kind=_kind_of(agent_name), params=agent_params)
+    )
+
+
+@dataclass
+class AgentProgress:
+    """Live status for one contestant during :func:`run_evaluation`."""
+
+    label: str
+    status: str = "queued"  # queued | training | running | done | error
+    episode: int = 0  # 1-based while running
+    n_episodes: int = 0
+    step: int = 0
+    episode_length: int = 0
+    detail: str = ""
+
+    def row(self) -> dict:
+        return asdict(self)
+
+
+class EvalProgressBoard:
+    """Thread-safe per-agent progress for parallel evaluation."""
+
+    def __init__(self, labels: list[str], n_episodes: int, episode_length: int):
+        self._lock = threading.Lock()
+        self._order = list(labels)
+        self._agents = {
+            label: AgentProgress(
+                label=label, n_episodes=n_episodes, episode_length=episode_length
+            )
+            for label in labels
+        }
+
+    def update(self, label: str, **fields) -> None:
+        with self._lock:
+            agent = self._agents[label]
+            for key, value in fields.items():
+                setattr(agent, key, value)
+
+    def snapshot(self) -> list[dict]:
+        with self._lock:
+            return [self._agents[label].row() for label in self._order]
+
+    def fraction(self) -> float:
+        """Approximate completion over all agents × episodes × steps."""
+        with self._lock:
+            total = 0.0
+            done = 0.0
+            for agent in self._agents.values():
+                length = max(int(agent.episode_length), 1)
+                units = float(agent.n_episodes * length)
+                total += units
+                if agent.status in {"done", "error"}:
+                    done += units
+                elif agent.status == "running":
+                    ep_done = max(int(agent.episode) - 1, 0)
+                    done += ep_done * length + min(int(agent.step), length)
+                elif agent.status == "training":
+                    done += 0.0
+            return min(done / total, 1.0) if total else 1.0
+
+    def summary_message(self) -> str:
+        with self._lock:
+            running = [a for a in self._agents.values() if a.status == "running"]
+            done = sum(1 for a in self._agents.values() if a.status == "done")
+            n = len(self._agents)
+            if not running:
+                return f"{done}/{n} contestants finished"
+            bits = []
+            for a in running[:3]:
+                bits.append(
+                    f"{a.label}: ep {a.episode}/{a.n_episodes} step {a.step}/{a.episode_length}"
+                )
+            extra = f" (+{len(running) - 3} more)" if len(running) > 3 else ""
+            return f"{done}/{n} done · " + " · ".join(bits) + extra
+
+
+def _evaluate_contestant(
+    *,
+    label: str,
+    agent_name: str,
+    agent_params: dict,
+    mode: str,
+    panel,
+    env_cfg: EnvConfig,
+    n_assets: int,
+    n_episodes: int,
+    episode_length: int,
+    seed: int,
+    n_trials: int,
+    board: EvalProgressBoard | None = None,
+) -> tuple[str, AgentRecord, list, np.ndarray]:
+    """Run one contestant on a private env (safe for thread-pool workers)."""
+    try:
+        if board is not None:
+            board.update(label, status="training" if agent_name in _GENERATIVE else "running",
+                         episode=0, step=0, detail="building env")
+
+        env = _build_env(mode, panel, env_cfg, seed)
+        agent = _make_agent_from_spec(agent_name, seed, agent_params)
+        if agent_name in _GENERATIVE:
+            if board is not None:
+                board.update(label, status="training", detail="training GenPortfolio")
+            agent.train(env)
+
+        episodes: list[dict] = []
+        for j in range(n_episodes):
+            if board is not None:
+                board.update(
+                    label,
+                    status="running",
+                    episode=j + 1,
+                    step=0,
+                    detail=f"episode {j + 1}/{n_episodes}",
+                )
+
+            def _on_step(step: int, _done: bool, *, _ep=j + 1) -> None:
+                if board is not None:
+                    board.update(
+                        label,
+                        status="running",
+                        episode=_ep,
+                        step=step,
+                        detail=f"episode {_ep}/{n_episodes} · step {step}/{episode_length}",
+                    )
+
+            episodes.append(
+                _run_episode(env, agent, n_assets, seed + j, on_step=_on_step)
+            )
+
+        replay = episodes[0]
+        episode_metrics = _per_episode_metrics(episodes, n_trials=n_trials)
+        metrics = {
+            k: float(np.mean([m[k] for m in episode_metrics])) for k in episode_metrics[0]
+        }
+        record = AgentRecord(
+            name=label,
+            equity=replay["equity"],
+            rewards=replay["rewards"],
+            exposure=replay["exposure"],
+            weights=replay["weights"],
+            fills=replay["fills"],
+            costs=replay["costs"],
+            thoughts=replay["thoughts"],
+            metrics=metrics,
+            parse_oks=replay["parse_oks"],
+            llm_actions=replay["llm_actions"],
+            episode_metrics=episode_metrics,
+        )
+        if board is not None:
+            board.update(
+                label,
+                status="done",
+                episode=n_episodes,
+                step=episode_length,
+                detail="done",
+            )
+        return label, record, replay["timestamps"], replay["prices"]
+    except Exception as exc:
+        if board is not None:
+            board.update(label, status="error", detail=str(exc))
+        raise
+
+
+def run_evaluation(
+    mode: str,
+    contestants: list[dict] | tuple[dict, ...],
+    n_assets: int = 4,
+    n_steps: int = 500,
+    episode_length: int = 120,
+    n_episodes: int = 20,
+    seed: int = 7,
+    initial_cash: float = 100_000.0,
+    commission_bps: float = 1.0,
+    half_spread_bps: float = 2.0,
+    reward_kind: str = "log_return",
+    use_mock: bool = False,
+    drift: float = 0.0004,
+    vol: float = 0.012,
+    progress=None,
+    max_workers: int = EVAL_MAX_WORKERS,
+) -> BenchmarkResult:
+    """Compare independently configured agents (including multiple LLM Vanilla instances).
+
+    Each contestant is a dict::
+
+        {"label": "LLM · openai · gpt-5.4-mini", "agent": "llm_vanilla", "params": {...}}
+
+    ``params`` are passed to :func:`build_agent` (nested ``llm={...}`` for LLM agents).
+    Labels must be unique; they become keys in :class:`BenchmarkResult.agents`.
+
+    Contestants run in a thread pool (default ``max_workers=3``, hard-capped) so several
+    LLM agents can call providers concurrently. Each worker builds its own env.
+
+    ``progress(fraction, message, agents=...)`` is called from the main thread. ``agents`` is
+    a list of per-contestant status dicts (episode, step, status).
+    """
+    if not contestants:
+        raise ValueError("run_evaluation requires at least one contestant")
+
+    params = {
+        "mode": mode,
+        "n_assets": n_assets,
+        "n_steps": n_steps,
+        "episode_length": episode_length,
+        "seed": seed,
+        "initial_cash": initial_cash,
+        "commission_bps": commission_bps,
+        "half_spread_bps": half_spread_bps,
+        "reward_kind": reward_kind,
+        "use_mock": use_mock,
+        "drift": drift,
+        "vol": vol,
+    }
+    panel, symbols = _panel_for(params)
+    n = len(symbols)
+    env_cfg = _env_config(params)
+    n_trials = len(contestants)
+    workers = max(1, min(int(max_workers), EVAL_MAX_WORKERS, n_trials))
+
+    specs: list[tuple[str, str, dict]] = []
+    seen: set[str] = set()
+    for spec in contestants:
+        label = str(
+            spec.get("label") or default_contestant_label(spec["agent"], spec.get("params"))
+        )
+        if label in seen:
+            raise ValueError(f"Duplicate contestant label: {label!r}")
+        seen.add(label)
+        specs.append((label, str(spec["agent"]), dict(spec.get("params") or {})))
+
+    board = EvalProgressBoard(
+        [label for label, _, _ in specs],
+        n_episodes=n_episodes,
+        episode_length=episode_length,
+    )
+
+    def _emit(message: str | None = None) -> None:
+        if progress is None:
+            return
+        progress(
+            board.fraction(),
+            message or board.summary_message(),
+            agents=board.snapshot(),
+        )
+
+    result = BenchmarkResult(mode=mode, symbols=symbols, timestamps=[], prices=np.empty(0))
+    _emit(f"Starting {n_trials} contestants ({workers} workers)…")
+
+    finished: dict[str, tuple[AgentRecord, list, np.ndarray]] = {}
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {
+            pool.submit(
+                _evaluate_contestant,
+                label=label,
+                agent_name=agent_name,
+                agent_params=agent_params,
+                mode=mode,
+                panel=panel,
+                env_cfg=env_cfg,
+                n_assets=n,
+                n_episodes=n_episodes,
+                episode_length=episode_length,
+                seed=seed,
+                n_trials=n_trials,
+                board=board,
+            ): label
+            for label, agent_name, agent_params in specs
+        }
+        pending = set(futures)
+        while pending:
+            completed, pending = wait(
+                pending, timeout=0.25, return_when=FIRST_COMPLETED
+            )
+            for fut in completed:
+                label, record, timestamps, prices = fut.result()
+                finished[label] = (record, timestamps, prices)
+            _emit()
+
+    for label, _, _ in specs:
+        record, timestamps, prices = finished[label]
+        result.agents[label] = record
+        if not result.timestamps:
+            result.timestamps = timestamps
+            result.prices = prices
+
+    _emit("Done")
+    return result

@@ -27,7 +27,7 @@ def render() -> None:
 
     st.divider()
 
-    c1, c2, c3, c4 = st.columns(4)
+    c1, c2, c3, c4, c5 = st.columns(5)
     with c1.container(border=True):
         st.markdown("### ⚙️ Configure")
         st.caption("Design the experiment: universe, costs and reward.")
@@ -41,8 +41,12 @@ def render() -> None:
         st.caption("Pick an agent, tune it, and watch its decisions step by step.")
         _link("live", "Launch a live run", "🎬")
     with c4.container(border=True):
-        st.markdown("### 📊 Analyze")
-        st.caption("Compare every agent: equity, drawdown and a risk-adjusted leaderboard.")
+        st.markdown("### 🏁 Evaluate")
+        st.caption("Roster many agents (incl. multiple LLMs) and crown a winner.")
+        _link("evaluate", "Open evaluate", "🏁")
+    with c5.container(border=True):
+        st.markdown("### 📊 Overview")
+        st.caption("Quick benchmark from Configure: equity, drawdown, leaderboard.")
         _link("overview", "Open overview", "📊")
 
     st.divider()

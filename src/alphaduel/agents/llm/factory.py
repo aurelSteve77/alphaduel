@@ -5,13 +5,29 @@ Instantiate models here (or in notebooks/scripts), then pass the object into
 
     from alphaduel.agents.llm import LLMHandler, VanillaLLMAgent
 
-    llm = LLMHandler.create("qwen3.5:2b", temperature=0.0)
+    llm = LLMHandler.create("qwen3.5:2b", provider="ollama", temperature=0.0)
+    llm = LLMHandler.create("gpt-5.4-mini", provider="openai", temperature=0.0)
+    llm = LLMHandler.create(
+        "meta/meta-llama-3-8b-instruct", provider="replicate", temperature=0.0
+    )
     agent = VanillaLLMAgent(llm=llm)
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+SUPPORTED_PROVIDERS = ("ollama", "openai", "replicate")
+
+# Sensible defaults shown in the dashboard when switching providers.
+DEFAULT_MODELS: dict[str, str] = {
+    "ollama": "qwen3.5:2b",
+    "openai": "gpt-5.4-mini",
+    "replicate": "meta/meta-llama-3-8b-instruct",
+}
+
+# OpenAI reasoning models (o-series / gpt-5.*): default effort when not overridden.
+DEFAULT_OPENAI_REASONING_EFFORT = "low"
 
 
 class LLMHandler:
@@ -32,30 +48,52 @@ class LLMHandler:
         Parameters
         ----------
         name:
-            Model identifier (e.g. ``\"qwen3.5:2b\"`` for Ollama).
+            Model identifier.
+            - Ollama: e.g. ``\"qwen3.5:2b\"``
+            - OpenAI: e.g. ``\"gpt-5.4-mini\"`` / ``\"gpt-4o-mini\"``
+            - Replicate: e.g. ``\"meta/meta-llama-3-8b-instruct\"`` or
+              ``\"owner/name:version\"``
         provider:
-            Backend to use. Currently ``\"ollama\"`` (via ``langchain-ollama``).
+            ``\"ollama\"``, ``\"openai\"`` (``langchain-openai`` / ChatOpenAI),
+            or ``\"replicate\"`` (``langchain-replicate`` / ChatReplicate).
         temperature:
-            Sampling temperature forwarded to the chat model.
+            Sampling temperature. For Replicate this is forwarded via
+            ``model_kwargs`` (Replicate OpenAPI inputs).
         reasoning:
-            Whether to enable model "thinking"/reasoning traces. Default ``False``
-            so responses stay concise and parseable.
+            Ollama-only: disable/enable thinking traces. For OpenAI, use
+            ``reasoning_effort`` (default ``\"low\"``).
         **kwargs:
-            Extra provider-specific kwargs (e.g. ``base_url``, ``num_ctx``).
+            Extra provider-specific kwargs
+            (``base_url``, ``api_key``, ``replicate_api_token``, ``model_kwargs``,
+            ``reasoning_effort``, …).
         """
         provider = (provider or "ollama").lower().strip()
         if not name or not str(name).strip():
             raise ValueError("LLM model name is required")
 
         if provider == "ollama":
+            kwargs.pop("reasoning_effort", None)
             return cls._create_ollama(
                 str(name).strip(),
                 temperature=temperature,
                 reasoning=reasoning,
                 **kwargs,
             )
+        if provider == "openai":
+            return cls._create_openai(
+                str(name).strip(),
+                temperature=temperature,
+                **kwargs,
+            )
+        if provider == "replicate":
+            kwargs.pop("reasoning_effort", None)
+            return cls._create_replicate(
+                str(name).strip(),
+                temperature=temperature,
+                **kwargs,
+            )
         raise ValueError(
-            f"Unknown LLM provider {provider!r}. Supported: 'ollama'."
+            f"Unknown LLM provider {provider!r}. Supported: {SUPPORTED_PROVIDERS}."
         )
 
     @staticmethod
@@ -71,6 +109,81 @@ class LLMHandler:
             ) from exc
         return ChatOllama(
             model=name, temperature=temperature, reasoning=reasoning, **kwargs
+        )
+
+    @staticmethod
+    def _create_openai(name: str, *, temperature: float, **kwargs: Any) -> Any:
+        """Build :class:`langchain_openai.ChatOpenAI`.
+
+        Auth: set ``OPENAI_API_KEY`` in the environment / ``.env``, or pass
+        ``api_key=...``. Optional ``base_url`` / ``OPENAI_API_BASE`` for proxies.
+        Defaults ``reasoning_effort=\"low\"`` (override or pass ``None`` to omit).
+        """
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "OpenAI chat models require the `llm` extra: "
+                "`uv sync --extra llm` (langchain-openai)."
+            ) from exc
+
+        api_key = kwargs.pop("api_key", None)
+        if api_key is None:
+            api_key = kwargs.pop("openai_api_key", None)
+
+        # Accept either base_url or openai_api_base (LangChain aliases).
+        base_url = kwargs.pop("base_url", None)
+        if base_url is None:
+            base_url = kwargs.pop("openai_api_base", None)
+
+        # Default low reasoning effort; explicit None removes the knob entirely.
+        if "reasoning_effort" not in kwargs:
+            kwargs["reasoning_effort"] = DEFAULT_OPENAI_REASONING_EFFORT
+        elif kwargs["reasoning_effort"] is None:
+            kwargs.pop("reasoning_effort")
+
+        init: dict[str, Any] = {
+            "model": name,
+            "temperature": temperature,
+        }
+        if api_key is not None:
+            init["api_key"] = api_key
+        if base_url is not None:
+            init["base_url"] = base_url
+        init.update(kwargs)
+        return ChatOpenAI(**init)
+
+    @staticmethod
+    def _create_replicate(name: str, *, temperature: float, **kwargs: Any) -> Any:
+        """Build :class:`langchain_replicate.ChatReplicate`.
+
+        Auth: set ``REPLICATE_API_TOKEN`` in the environment / ``.env``, or pass
+        ``replicate_api_token=...``. See https://github.com/replicate/replicate-langchain
+        """
+        try:
+            from langchain_replicate import ChatReplicate
+        except ImportError as exc:
+            raise ImportError(
+                "Replicate chat models require the `llm` extra: "
+                "`uv sync --extra llm` (langchain-replicate from GitHub)."
+            ) from exc
+
+        model_kwargs = dict(kwargs.pop("model_kwargs", {}) or {})
+        # ChatReplicate takes generation knobs via model_kwargs (OpenAPI inputs).
+        if "temperature" not in model_kwargs:
+            model_kwargs["temperature"] = temperature
+
+        api_token = kwargs.pop("replicate_api_token", None)
+        if api_token is None:
+            api_token = kwargs.pop("api_token", None)
+
+        streaming = bool(kwargs.pop("streaming", False))
+        return ChatReplicate(
+            model=name,
+            model_kwargs=model_kwargs,
+            replicate_api_token=api_token,
+            streaming=streaming,
+            **kwargs,
         )
 
 
@@ -92,6 +205,24 @@ def create_llm(
     )
 
 
+def _inject_secrets(cfg: dict[str, Any]) -> None:
+    """Fill API tokens from ``Secrets`` / ``.env`` when not passed explicitly."""
+    provider = cfg.get("provider", "ollama")
+    try:
+        from alphaduel.config.schema import Secrets
+
+        secrets = Secrets()
+    except Exception:  # noqa: BLE001 — secrets optional at import time
+        return
+
+    if provider == "replicate" and not cfg.get("replicate_api_token"):
+        if secrets.replicate_api_token:
+            cfg["replicate_api_token"] = secrets.replicate_api_token
+    elif provider == "openai" and not cfg.get("api_key") and not cfg.get("openai_api_key"):
+        if secrets.openai_api_key:
+            cfg["api_key"] = secrets.openai_api_key
+
+
 def resolve_llm(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
     """Pop LLM construction keys from agent params and return ``(llm, agent_params)``.
 
@@ -108,7 +239,24 @@ def resolve_llm(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
 
     cfg: dict[str, Any] = dict(llm) if isinstance(llm, dict) else {}
     # Flat YAML keys fill any gaps in a nested llm block.
-    for key in ("provider", "model", "name", "temperature", "base_url", "reasoning"):
+    for key in (
+        "provider",
+        "model",
+        "name",
+        "temperature",
+        "base_url",
+        "openai_api_base",
+        "reasoning",
+        "api_key",
+        "openai_api_key",
+        "replicate_api_token",
+        "streaming",
+        "model_kwargs",
+        "max_retries",
+        "timeout",
+        "reasoning_effort",
+        "max_completion_tokens",
+    ):
         if key in out and key not in cfg:
             cfg[key] = out.pop(key)
         elif key in out and key in cfg:
@@ -120,4 +268,5 @@ def resolve_llm(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
             "LLM agent requires an `llm` object or model name "
             "(params.llm / params.model / params.llm.model)."
         )
+    _inject_secrets(cfg)
     return create_llm(str(name), **cfg), out

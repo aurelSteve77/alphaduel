@@ -11,7 +11,10 @@ from alphaduel.dashboard.components import agent_config, theme
 def render() -> None:
     params = dict(state.ensure_params())
     st.title("⚙️ Configure experiment")
-    st.caption("Settings here drive the Live run, Overview, Agent detail and Market pages.")
+    st.caption(
+        "Settings here drive Live run, Evaluate, Overview, Agent detail and Market. "
+        "Use **Evaluate** to compare multiple LLM Vanilla configs side by side."
+    )
 
     presets = state.load_presets()
     with st.container(border=True):

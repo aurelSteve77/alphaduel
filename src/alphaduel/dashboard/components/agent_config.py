@@ -51,20 +51,45 @@ def render_llm_settings(defaults: dict | None = None, key: str = "llm_global") -
 
 
 def _render_llm(kp: str, defaults: dict) -> dict:
+    from alphaduel.agents.llm.factory import DEFAULT_MODELS, SUPPORTED_PROVIDERS
+
     st.caption(
-        "Requires `uv sync --extra llm` and a running Ollama daemon with the model pulled. "
-        "Reasoning traces are off by default."
+        "Providers: **ollama** (local), **openai** (`OPENAI_API_KEY`), "
+        "**replicate** (`REPLICATE_API_TOKEN`). Install with `uv sync --extra llm`."
     )
-    c1, c2 = st.columns(2)
-    provider = c1.selectbox(
+    providers = list(SUPPORTED_PROVIDERS)
+    default_provider = str(defaults.get("llm_provider", defaults.get("provider", "ollama")))
+    if default_provider not in providers:
+        default_provider = "ollama"
+    provider = st.selectbox(
         "Provider",
-        ["ollama"],
-        index=0,
+        providers,
+        index=providers.index(default_provider),
         key=f"{kp}_provider",
     )
-    model = c2.text_input(
+
+    stored_model = str(
+        defaults.get(
+            "llm_model",
+            defaults.get("model", DEFAULT_MODELS.get(provider, DEFAULT_MODELS["ollama"])),
+        )
+    )
+    # When switching providers, swap to that provider's default if the stored model
+    # still matches another provider's built-in default.
+    other_defaults = {v for k, v in DEFAULT_MODELS.items() if k != provider}
+    default_model = (
+        DEFAULT_MODELS[provider] if stored_model in other_defaults else stored_model
+    )
+
+    model_help = {
+        "ollama": "Ollama tag, e.g. qwen3.5:2b",
+        "openai": "OpenAI model id, e.g. gpt-5.4-mini or gpt-4o-mini",
+        "replicate": "Replicate id, e.g. meta/meta-llama-3-8b-instruct or owner/name:version",
+    }
+    model = st.text_input(
         "Model",
-        value=str(defaults.get("llm_model", defaults.get("model", "qwen3.5:2b"))),
+        value=default_model,
+        help=model_help.get(provider, "Model identifier for the selected provider."),
         key=f"{kp}_model",
     )
     c3, c4 = st.columns(2)
@@ -76,11 +101,33 @@ def _render_llm(kp: str, defaults: dict) -> dict:
         step=0.05,
         key=f"{kp}_temp",
     )
-    reasoning = c4.checkbox(
-        "Enable reasoning traces",
-        value=bool(defaults.get("llm_reasoning", defaults.get("reasoning", False))),
-        key=f"{kp}_reason",
-    )
+    if provider == "ollama":
+        reasoning = c4.checkbox(
+            "Enable reasoning traces",
+            value=bool(defaults.get("llm_reasoning", defaults.get("reasoning", False))),
+            key=f"{kp}_reason",
+        )
+        reasoning_effort = "low"
+    elif provider == "openai":
+        reasoning = False
+        efforts = ["low", "medium", "high", "none"]
+        default_effort = str(
+            defaults.get("llm_reasoning_effort", defaults.get("reasoning_effort", "low"))
+        )
+        if default_effort not in efforts:
+            default_effort = "low"
+        reasoning_effort = c4.selectbox(
+            "Reasoning effort",
+            efforts,
+            index=efforts.index(default_effort),
+            key=f"{kp}_effort",
+            help="OpenAI reasoning_effort (default low).",
+        )
+    else:
+        reasoning = False
+        reasoning_effort = "low"
+        c4.caption("Replicate: set `REPLICATE_API_TOKEN` in `.env`.")
+
     use_memory = st.checkbox(
         "Use conversation memory",
         value=bool(defaults.get("llm_use_memory", defaults.get("use_memory", False))),
@@ -113,13 +160,19 @@ def _render_llm(kp: str, defaults: dict) -> dict:
         key=f"{kp}_usr",
     )
 
+    llm_cfg: dict = {
+        "provider": provider,
+        "model": model.strip() or DEFAULT_MODELS.get(provider, "qwen3.5:2b"),
+        "temperature": float(temperature),
+        "reasoning": bool(reasoning),
+    }
+    if provider == "openai" and reasoning_effort != "none":
+        llm_cfg["reasoning_effort"] = reasoning_effort
+    elif provider == "openai" and reasoning_effort == "none":
+        llm_cfg["reasoning_effort"] = None
+
     return {
-        "llm": {
-            "provider": provider,
-            "model": model.strip() or "qwen3.5:2b",
-            "temperature": float(temperature),
-            "reasoning": bool(reasoning),
-        },
+        "llm": llm_cfg,
         "use_memory": bool(use_memory),
         "max_memory_turns": int(max_memory_turns),
         "system_prompt_key": system_prompt_key,
@@ -135,6 +188,7 @@ def flatten_llm_params(agent_params: dict) -> dict:
         "llm_model": llm.get("model", "qwen3.5:2b"),
         "llm_temperature": float(llm.get("temperature", 0.0)),
         "llm_reasoning": bool(llm.get("reasoning", False)),
+        "llm_reasoning_effort": llm.get("reasoning_effort") or "low",
         "llm_use_memory": bool(agent_params.get("use_memory", False)),
         "llm_max_memory_turns": int(agent_params.get("max_memory_turns", 8)),
         "llm_system_prompt_key": agent_params.get("system_prompt_key", "base_agent_system"),
