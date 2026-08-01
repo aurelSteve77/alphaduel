@@ -1,6 +1,18 @@
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
 
 from alphaduel.dashboard import engine
+
+
+class _FakeLLM:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    def invoke(self, messages):
+        return SimpleNamespace(content=self.text)
 
 
 def test_single_asset_benchmark_runs():
@@ -32,12 +44,21 @@ def test_multi_asset_benchmark_weights_sum_le_one():
         n_episodes=2,
         seed=5,
         use_mock=True,
+        symbols=("AAPL", "MSFT", "GOOGL", "AMZN"),
     )
     assert set(r.agents) == set(agents)
+    assert r.symbols == ["AAPL", "MSFT", "GOOGL", "AMZN"]
     for rec in r.agents.values():
         assert rec.weights.shape == (40, 4)
         assert np.all(rec.weights.sum(axis=1) <= 1.0 + 1e-6)
         assert np.all(rec.weights >= -1e-6)
+
+
+def test_default_params_include_symbols():
+    p = engine.default_params()
+    assert isinstance(p["symbols"], tuple)
+    assert len(p["symbols"]) == p["n_assets"] >= 2
+    assert p["start_date"] < p["end_date"]
 
 
 def test_llm_vanilla_listed_for_both_modes():
@@ -124,6 +145,46 @@ def test_run_evaluation_progress_reports_per_agent():
     assert all(a["status"] == "done" for a in final)
     # Workers publish episode/step even if mid-run snapshots are skipped for fast agents.
     assert all(a["episode"] == 2 and a["step"] == 15 for a in final)
+
+
+def test_run_evaluation_saves_llm_dataset(tmp_path):
+    reply = 'hold\n```json\n{"actions": {"ASS1": 0}}\n```'
+    contestants = [
+        {
+            "label": "LLM toy",
+            "agent": "llm_vanilla",
+            "params": {
+                "llm": _FakeLLM(reply),
+                "mask_symbols": True,
+            },
+        },
+        {"label": "EW", "agent": "equal_weight", "params": {}},
+    ]
+    r = engine.run_evaluation(
+        mode="multi_asset",
+        contestants=contestants,
+        n_assets=2,
+        n_steps=80,
+        episode_length=10,
+        n_episodes=1,
+        seed=9,
+        use_mock=True,
+        max_workers=2,
+        save_llm_dataset=True,
+        dataset_root=tmp_path,
+    )
+    assert r.dataset_dir is not None
+    root = Path(r.dataset_dir)
+    assert (root / "manifest.json").exists()
+    agent_dir = root / "llm_toy"
+    assert (agent_dir / "meta.json").exists()
+    assert (agent_dir / "episode_000.json").exists()
+    ep = json.loads((agent_dir / "episode_000.json").read_text())
+    assert ep["n_steps"] == 10
+    assert ep["steps"][0]["sft_messages"][0]["role"] == "system"
+    assert "market_state" in ep["steps"][0]
+    # Baseline contestant should not get a dataset folder.
+    assert not (root / "ew").exists()
 
 
 def test_default_contestant_label_for_llm():

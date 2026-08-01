@@ -1,5 +1,7 @@
-Here is the current market state for symbols: {{ symbols | join(', ') }}.
+Here is the current market state for anonymized symbols: {{ symbols | join(', ') }}.
+
+Asset labels are ASS1, ASS2, … (not real tickers). Trade only those labels.
 
 {{ market_state }}
 
-Write your analysis, then end with a fenced JSON actions block.
+Write your analysis using ASS* names only, then end with a fenced JSON actions block.

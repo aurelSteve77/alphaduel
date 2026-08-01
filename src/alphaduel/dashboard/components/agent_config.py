@@ -55,7 +55,8 @@ def _render_llm(kp: str, defaults: dict) -> dict:
 
     st.caption(
         "Providers: **ollama** (local), **openai** (`OPENAI_API_KEY`), "
-        "**replicate** (`REPLICATE_API_TOKEN`). Install with `uv sync --extra llm`."
+        "**anthropic** (`ANTHROPIC_API_KEY`), **replicate** (`REPLICATE_API_TOKEN`). "
+        "Install with `uv sync --extra llm`."
     )
     providers = list(SUPPORTED_PROVIDERS)
     default_provider = str(defaults.get("llm_provider", defaults.get("provider", "ollama")))
@@ -84,6 +85,7 @@ def _render_llm(kp: str, defaults: dict) -> dict:
     model_help = {
         "ollama": "Ollama tag, e.g. qwen3.5:2b",
         "openai": "OpenAI model id, e.g. gpt-5.4-mini or gpt-4o-mini",
+        "anthropic": "Claude model id, e.g. claude-haiku-4-5-20251001 or claude-sonnet-4-5",
         "replicate": "Replicate id, e.g. meta/meta-llama-3-8b-instruct or owner/name:version",
     }
     model = st.text_input(
@@ -123,6 +125,10 @@ def _render_llm(kp: str, defaults: dict) -> dict:
             key=f"{kp}_effort",
             help="OpenAI reasoning_effort (default low).",
         )
+    elif provider == "anthropic":
+        reasoning = False
+        reasoning_effort = "low"
+        c4.caption("Anthropic: set `ANTHROPIC_API_KEY` in `.env`.")
     else:
         reasoning = False
         reasoning_effort = "low"
@@ -139,6 +145,13 @@ def _render_llm(kp: str, defaults: dict) -> dict:
         20,
         int(defaults.get("llm_max_memory_turns", defaults.get("max_memory_turns", 8))),
         key=f"{kp}_mem_n",
+    )
+    mask_symbols = st.checkbox(
+        "Anonymize tickers for the LLM (ASS1, ASS2, …)",
+        value=bool(defaults.get("llm_mask_symbols", defaults.get("mask_symbols", True))),
+        key=f"{kp}_mask",
+        help="Prevents the model from using pretrained knowledge of real company tickers. "
+        "Dashboard charts still show real symbols; actions are remapped after the LLM replies.",
     )
 
     prompt_keys = prompt_manager.keys() or ["base_agent_system", "base_agent_user"]
@@ -175,6 +188,7 @@ def _render_llm(kp: str, defaults: dict) -> dict:
         "llm": llm_cfg,
         "use_memory": bool(use_memory),
         "max_memory_turns": int(max_memory_turns),
+        "mask_symbols": bool(mask_symbols),
         "system_prompt_key": system_prompt_key,
         "user_prompt_key": user_prompt_key,
     }
@@ -191,6 +205,7 @@ def flatten_llm_params(agent_params: dict) -> dict:
         "llm_reasoning_effort": llm.get("reasoning_effort") or "low",
         "llm_use_memory": bool(agent_params.get("use_memory", False)),
         "llm_max_memory_turns": int(agent_params.get("max_memory_turns", 8)),
+        "llm_mask_symbols": bool(agent_params.get("mask_symbols", True)),
         "llm_system_prompt_key": agent_params.get("system_prompt_key", "base_agent_system"),
         "llm_user_prompt_key": agent_params.get("user_prompt_key", "base_agent_user"),
     }

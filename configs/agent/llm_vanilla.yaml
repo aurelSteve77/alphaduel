@@ -2,6 +2,7 @@
 # Requires: uv sync --extra llm
 #   - ollama:    local daemon + pulled model
 #   - openai:    OPENAI_API_KEY in .env
+#   - anthropic: ANTHROPIC_API_KEY in .env (https://console.anthropic.com/)
 #   - replicate: REPLICATE_API_TOKEN in .env (https://replicate.com/account)
 agents:
   - name: llm_vanilla
@@ -9,8 +10,8 @@ agents:
     params:
       # Built by alphaduel.agents.llm.resolve_llm / LLMHandler.create
       llm:
-        provider: ollama          # ollama | openai | replicate
-        model: "qwen3.5:2b"       # openai e.g. gpt-5.4-mini; replicate e.g. meta/meta-llama-3-8b-instruct
+        provider: ollama          # ollama | openai | anthropic | replicate
+        model: "qwen3.5:2b"       # openai e.g. gpt-5.4-mini; anthropic e.g. claude-haiku-4-5-20251001
         temperature: 0.0
         reasoning: false          # ollama-only
         reasoning_effort: low     # openai-only (default low); omit / null to disable
@@ -18,5 +19,6 @@ agents:
       max_memory_turns: 8
       system_prompt_key: base_agent_system
       user_prompt_key: base_agent_user
+      mask_symbols: true
       # symbols: null  # defaults to env info["symbols"] (or real ticker for single-asset)
       allow_short: false

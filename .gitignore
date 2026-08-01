@@ -16,6 +16,7 @@ uv.lock
 
 # Caches / artifacts
 data_cache/
+datasets/
 mlruns/
 .mypy_cache/
 .ruff_cache/

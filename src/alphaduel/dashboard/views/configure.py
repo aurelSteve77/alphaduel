@@ -2,10 +2,76 @@
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import streamlit as st
 
 from alphaduel.dashboard import engine, real_data, state
 from alphaduel.dashboard.components import agent_config, theme
+
+
+def _parse_extra_tickers(text: str) -> list[str]:
+    return [s.strip().upper() for s in text.replace(";", ",").split(",") if s.strip()]
+
+
+def _as_date(value: str | date | None, fallback: date) -> date:
+    if value is None:
+        return fallback
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
+
+
+def _render_symbol_picker(mode: str, params: dict) -> tuple[str, ...]:
+    """Return the selected ticker tuple for the current mode."""
+    catalog = real_data.symbol_catalog()
+    prev = [str(s).upper() for s in params.get("symbols") or ()]
+
+    if mode == "single_asset":
+        options = list(catalog)
+        custom_label = "Custom ticker…"
+        if custom_label not in options:
+            options = [*options, custom_label]
+        default = prev[0] if prev else (catalog[0] if catalog else "AAPL")
+        if default not in options and default != custom_label:
+            options = [default, *options]
+        index = options.index(default) if default in options else 0
+        choice = st.selectbox("Stock", options, index=index, key="cfg_single_symbol")
+        if choice == custom_label:
+            custom = st.text_input(
+                "Ticker",
+                value=default if default not in catalog else "",
+                placeholder="e.g. META",
+                key="cfg_single_custom",
+            ).strip().upper()
+            if not custom:
+                st.warning("Enter a ticker symbol.")
+                return (default if default != custom_label else "AAPL",)
+            return (custom,)
+        return (choice,)
+
+    # Multi-asset: one comma-separated ticker field (catalog + any custom names).
+    default_multi = prev or list(
+        engine.default_symbols("multi_asset", int(params.get("n_assets", 4)))
+    )
+    text = st.text_input(
+        "Stocks (comma-separated)",
+        value=", ".join(default_multi),
+        key="cfg_multi_symbols",
+        help=(
+            "Any yfinance tickers. Catalog examples: "
+            + ", ".join(catalog[:8])
+            + ("…" if len(catalog) > 8 else "")
+        ),
+        placeholder="e.g. MSFT, JNJ, XOM, JPM, PG, CAT, ASML, SHEL, TM, BHP",
+    )
+    merged = _parse_extra_tickers(text)
+    if len(merged) < 2:
+        st.warning("Enter at least two tickers for multi-asset mode.")
+        fallback = list(engine.default_symbols("multi_asset", 4))
+        return tuple(merged) if len(merged) >= 2 else tuple(fallback)
+    st.caption(f"{len(merged)} assets: " + ", ".join(merged))
+    return tuple(merged)
 
 
 def render() -> None:
@@ -35,16 +101,8 @@ def render() -> None:
     )
     mode = "multi_asset" if mode_label.startswith("Multi") else "single_asset"
 
-    universe = real_data.universe_symbols(mode)
-    n_assets = params["n_assets"]
-    if mode == "multi_asset":
-        max_assets = len(universe)
-        n_assets = st.slider("Number of assets", 2, max_assets, min(int(n_assets), max_assets))
-        selected = universe[:n_assets]
-        st.caption("Symbols: " + ", ".join(selected))
-    else:
-        n_assets = 1
-        st.caption(f"Symbol: {universe[0]}")
+    symbols = _render_symbol_picker(mode, params)
+    n_assets = len(symbols)
 
     available = engine.agents_for(mode)
     prev = [a for a in params["agent_names"] if a in available] or engine.baseline_agents(mode)
@@ -53,17 +111,59 @@ def render() -> None:
     )
     if any(a in engine.LLM_AGENTS for a in agent_names):
         st.info(
-            "LLM Vanilla needs Ollama (`uv sync --extra llm`). "
-            "Benchmarks with it are slower — prefer Live run for interactive trials."
+            "LLM Vanilla needs `uv sync --extra llm` plus a provider key / Ollama. "
+            "Benchmarks with it are slower — prefer Live run or Evaluate for trials."
         )
 
     st.subheader("Market window")
-    n_steps = st.slider(
-        "Use last N trading days", 250, 1500, int(params["n_steps"]), step=50
+    yaml_start, yaml_end = real_data.default_date_range(mode)
+    default_start = _as_date(params.get("start_date"), date.fromisoformat(yaml_start))
+    default_end = _as_date(params.get("end_date"), date.fromisoformat(yaml_end))
+    min_date = date(1990, 1, 1)
+    max_date = date.today() + timedelta(days=1)
+
+    d1, d2 = st.columns(2)
+    start_d = d1.date_input(
+        "Start date",
+        value=default_start,
+        min_value=min_date,
+        max_value=max_date,
+        key="cfg_start_date",
     )
+    end_d = d2.date_input(
+        "End date",
+        value=default_end,
+        min_value=min_date,
+        max_value=max_date,
+        key="cfg_end_date",
+    )
+    if end_d <= start_d:
+        st.warning("End date must be after start date.")
+        end_d = start_d + timedelta(days=1)
+
+    limit_tail = st.checkbox(
+        "Also limit to the last N trading days within this range",
+        value=bool(params.get("limit_n_steps", True)),
+        key="cfg_limit_n_steps",
+        help="If unchecked, the full start→end window is used (subject to available data).",
+    )
+    if limit_tail:
+        n_steps = st.slider(
+            "Max trading days (tail of the range)",
+            250,
+            3000,
+            int(params.get("n_steps") or 500),
+            step=50,
+            key="cfg_n_steps",
+        )
+    else:
+        n_steps = None
+        st.caption("Using the full date range (no N-day tail).")
+
     st.caption(
         "Prices come from yfinance (cached under `data_cache/`). "
-        "Or use the **Data** page to download / refresh the cache."
+        "Changing dates/symbols may trigger a download on first use. "
+        "Or use the **Data** page to refresh the cache."
     )
 
     st.subheader("Episodes")
@@ -104,8 +204,12 @@ def render() -> None:
     st.session_state["params"] = {
         "mode": mode,
         "agent_names": tuple(agent_names),
+        "symbols": tuple(symbols),
         "n_assets": int(n_assets),
-        "n_steps": int(n_steps),
+        "start_date": start_d.isoformat(),
+        "end_date": end_d.isoformat(),
+        "limit_n_steps": bool(limit_tail),
+        "n_steps": int(n_steps) if n_steps is not None else None,
         "episode_length": int(episode_length),
         "n_episodes": int(n_episodes),
         "seed": int(seed),
@@ -141,8 +245,13 @@ def render() -> None:
     st.divider()
     if not agent_names:
         st.warning("Select at least one agent to enable the benchmark pages.")
+    elif mode == "multi_asset" and len(symbols) < 2:
+        st.warning("Pick at least two stocks for multi-asset mode.")
     else:
-        st.success(f"Configured {len(agent_names)} agent(s) on a {mode_label.lower()} universe.")
+        st.success(
+            f"Configured {len(agent_names)} agent(s) on "
+            f"{', '.join(symbols)} · {start_d.isoformat()} → {end_d.isoformat()}."
+        )
     overview = st.session_state.get("_pages", {}).get("overview")
     if overview is not None:
         st.page_link(overview, label="Go to Overview", icon="📊")

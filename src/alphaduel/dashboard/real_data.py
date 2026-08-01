@@ -32,6 +32,22 @@ def universe_symbols(mode: str) -> list[str]:
     return list(cfg.data.symbols)
 
 
+def symbol_catalog() -> list[str]:
+    """Union of single- and multi-asset YAML universes for the Configure picker."""
+    seen: list[str] = []
+    for mode in ("multi_asset", "single_asset"):
+        for sym in universe_symbols(mode):
+            if sym not in seen:
+                seen.append(sym)
+    return seen
+
+
+def default_date_range(mode: str) -> tuple[str, str]:
+    """ISO date strings ``(start, end)`` from the mode's experiment YAML."""
+    cfg = load_experiment_config(config_path_for(mode))
+    return cfg.data.start.isoformat(), cfg.data.end.isoformat()
+
+
 def _tail(panel: MarketPanel | MultiAssetPanel, n_steps: int | None):
     if n_steps is None or panel.n_steps <= n_steps:
         return panel
@@ -59,17 +75,42 @@ def load_panel(
     mode: str,
     n_assets: int = 4,
     n_steps: int | None = 500,
+    symbols: list[str] | tuple[str, ...] | None = None,
+    start: str | None = None,
+    end: str | None = None,
 ) -> tuple[MarketPanel | MultiAssetPanel, list[str]]:
     """Build a real-data panel for the dashboard.
 
     Downloads into the Parquet cache on first use when data is missing.
+    ``symbols`` / ``start`` / ``end`` override the YAML universe and date window.
+    ``n_steps`` then keeps only the last N bars of that window (if set).
     """
+    from datetime import date
+
     cfg = load_experiment_config(config_path_for(mode))
-    if mode == "multi_asset":
-        symbols = list(cfg.data.symbols[: max(1, n_assets)])
+    if symbols:
+        syms = [str(s).strip().upper() for s in symbols if str(s).strip()]
+        if not syms:
+            raise ValueError("At least one symbol is required")
+        if mode == "single_asset":
+            syms = syms[:1]
+        elif len(syms) < 2:
+            raise ValueError("Multi-asset mode requires at least 2 symbols")
+    elif mode == "multi_asset":
+        syms = list(cfg.data.symbols[: max(1, n_assets)])
     else:
-        symbols = list(cfg.data.symbols[:1])
-    cfg = cfg.model_copy(update={"data": cfg.data.model_copy(update={"symbols": symbols})})
+        syms = list(cfg.data.symbols[:1])
+
+    data_updates: dict = {"symbols": syms}
+    if start:
+        data_updates["start"] = date.fromisoformat(str(start)[:10])
+    if end:
+        data_updates["end"] = date.fromisoformat(str(end)[:10])
+    if data_updates.get("start") and data_updates.get("end"):
+        if data_updates["end"] <= data_updates["start"]:
+            raise ValueError("end date must be after start date")
+
+    cfg = cfg.model_copy(update={"data": cfg.data.model_copy(update=data_updates)})
 
     panel = build_panel(cfg, Secrets())
     panel = _tail(panel, n_steps)

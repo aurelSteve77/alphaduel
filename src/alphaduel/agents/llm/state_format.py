@@ -57,15 +57,22 @@ def format_market_state(
         if obs.size > 24:
             lines.append(f"  ... ({obs.size - 24} more values omitted)")
 
+    example_keys = symbols[:2] if len(symbols) >= 2 else (symbols + ["ASS2"])[:2]
+    example_json = (
+        '{"actions": {'
+        + ", ".join(f'"{sym}": {delta}' for sym, delta in zip(example_keys, (2, -1)))
+        + "}}"
+    )
     lines.extend(
         [
             "",
             "=== ACTION PROTOCOL ===",
             "Decide share deltas for tickers you want to trade.",
             "Positive = buy shares, negative = sell shares, omit = hold (no trade).",
-            'End your reply with a fenced JSON block:',
-            '```json',
-            '{"actions": {"AAPL": 2, "MSFT": -1}}',
+            "Use only ticker labels listed in this state.",
+            "End your reply with a fenced JSON block:",
+            "```json",
+            example_json,
             "```",
         ]
     )

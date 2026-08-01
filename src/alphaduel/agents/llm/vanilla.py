@@ -8,14 +8,17 @@ then pass it in::
     llm = LLMHandler.create("qwen3.5:2b", temperature=0.0)
     agent = VanillaLLMAgent(llm=llm)
 
-The agent reads a structured market brief, produces free-form natural language, and
-embeds share-delta actions in a fenced JSON block::
+The agent reads a structured market brief with **anonymized** tickers (ASS1, ASS2, …),
+produces free-form natural language, and embeds share-delta actions in a fenced JSON
+block::
 
     ```json
-    {"actions": {"AAPL": 2, "MSFT": -1}}
+    {"actions": {"ASS1": 2, "ASS2": -1}}
     ```
 
-Omitted tickers are held. A parse failure becomes a no-trade with ``last_parse_ok=False``.
+Actions are unmasked back to real symbols before execution. ``last_actions`` exposes
+the **real** ticker deltas for the dashboard. Omitted tickers are held. A parse failure
+becomes a no-trade with ``last_parse_ok=False``.
 """
 
 from __future__ import annotations
@@ -27,11 +30,13 @@ from langchain_core.messages import BaseMessage, SystemMessage
 
 from alphaduel.agents.base import Agent
 from alphaduel.agents.llm.graph import build_llm_graph
+from alphaduel.agents.llm.masking import SymbolMask
 from alphaduel.agents.llm.parse import ParsedLLMAction
 from alphaduel.agents.llm.state_format import (
     format_market_state,
     share_deltas_to_target_weights,
 )
+from alphaduel.agents.llm.trajectory import serialize_messages, to_jsonable
 from alphaduel.prompts import prompt_manager
 
 
@@ -50,6 +55,7 @@ class VanillaLLMAgent(Agent):
         user_prompt_key: str = "base_agent_user",
         symbols: list[str] | None = None,
         allow_short: bool = False,
+        mask_symbols: bool = True,
     ) -> None:
         if llm is None:
             raise TypeError(
@@ -63,11 +69,15 @@ class VanillaLLMAgent(Agent):
         self.user_prompt_key = user_prompt_key
         self.symbols = list(symbols) if symbols else None
         self.allow_short = bool(allow_short)
+        self.mask_symbols = bool(mask_symbols)
 
         self.last_thoughts: str | None = None
         self.last_parse_ok: bool = False
         self.last_actions: dict[str, int] = {}
+        self.last_masked_actions: dict[str, int] = {}
         self.last_raw_response: str = ""
+        self.last_symbol_mask: SymbolMask | None = None
+        self.last_trace: dict[str, Any] | None = None
 
         self._graph = build_llm_graph(self.llm)
         self._memory: list[BaseMessage] = []
@@ -79,15 +89,22 @@ class VanillaLLMAgent(Agent):
         self.last_thoughts = None
         self.last_parse_ok = False
         self.last_actions = {}
+        self.last_masked_actions = {}
         self.last_raw_response = ""
+        self.last_symbol_mask = None
+        self.last_trace = None
 
     def act(self, observation: np.ndarray, info: dict) -> np.ndarray:
-        symbols = self._symbols_from(info)
-        market_state = format_market_state(observation, info, symbols=symbols)
+        real_symbols = self._symbols_from(info)
+        mask = SymbolMask.from_symbols(real_symbols) if self.mask_symbols else None
+        llm_symbols = list(mask.masked) if mask is not None else list(real_symbols)
+        self.last_symbol_mask = mask
+
+        market_state = format_market_state(observation, info, symbols=llm_symbols)
         system_text = prompt_manager.get(self.system_prompt_key).content
         user_text = prompt_manager.get(self.user_prompt_key).render(
             market_state=market_state,
-            symbols=symbols,
+            symbols=llm_symbols,
         )
 
         prior: list[BaseMessage] = [SystemMessage(content=system_text)]
@@ -107,34 +124,95 @@ class VanillaLLMAgent(Agent):
         self.last_raw_response = parsed.raw
         self.last_thoughts = parsed.rationale
         self.last_parse_ok = parsed.parse_ok
-        self.last_actions = dict(parsed.actions) if parsed.parse_ok else {}
+
+        if parsed.parse_ok and mask is not None:
+            self.last_masked_actions = {
+                str(k).upper(): int(v) for k, v in parsed.actions.items()
+            }
+            self.last_actions = mask.unmask_actions(parsed.actions)
+        elif parsed.parse_ok:
+            self.last_masked_actions = {}
+            self.last_actions = dict(parsed.actions)
+        else:
+            self.last_masked_actions = {}
+            self.last_actions = {}
 
         if self.use_memory:
             # Keep only the newest human/AI turns produced by the graph (skip system).
             new_msgs = [m for m in result["messages"] if not isinstance(m, SystemMessage)]
             self._memory = new_msgs[-(2 * self.max_memory_turns) :]
 
-        shares, prices, equity = self._portfolio_arrays(info, symbols)
+        shares, prices, equity = self._portfolio_arrays(info, real_symbols)
         if not parsed.parse_ok:
             # Do nothing: target current weights (or zeros if flat).
             if equity <= 0:
-                return np.zeros(len(symbols), dtype=np.float32)
-            current = (shares * prices) / equity
-            current = np.clip(current, 0.0, 1.0)
-            total = float(current.sum())
-            if total > 1.0:
-                current = current / total
-            return current.astype(np.float32)
+                weights = np.zeros(len(real_symbols), dtype=np.float32)
+            else:
+                current = (shares * prices) / equity
+                current = np.clip(current, 0.0, 1.0)
+                total = float(current.sum())
+                if total > 1.0:
+                    current = current / total
+                weights = current.astype(np.float32)
+        else:
+            weights = share_deltas_to_target_weights(
+                self.last_actions,
+                symbols=real_symbols,
+                shares=shares,
+                prices=prices,
+                equity=equity,
+                allow_short=self.allow_short,
+            )
+            if len(real_symbols) == 1:
+                weights = weights[:1]
 
-        weights = share_deltas_to_target_weights(
-            parsed.actions,
-            symbols=symbols,
-            shares=shares,
-            prices=prices,
-            equity=equity,
-            allow_short=self.allow_short,
-        )
-        return weights if len(symbols) > 1 else weights[:1]
+        # Full context the model saw + a clean single-turn SFT triple.
+        full_messages = serialize_messages(list(result.get("messages") or []))
+        sft_messages = [
+            {"role": "system", "content": system_text},
+            {"role": "user", "content": user_text},
+            {"role": "assistant", "content": self.last_raw_response or ""},
+        ]
+        symbol_map = {}
+        if mask is not None:
+            symbol_map = {m: r for m, r in zip(mask.masked, mask.real)}
+
+        self.last_trace = {
+            "market_state": market_state,
+            "system_prompt_key": self.system_prompt_key,
+            "user_prompt_key": self.user_prompt_key,
+            "system_prompt": system_text,
+            "user_prompt": user_text,
+            "messages": full_messages,
+            "sft_messages": sft_messages,
+            "assistant_raw": self.last_raw_response,
+            "parse_ok": bool(self.last_parse_ok),
+            "actions_masked": dict(self.last_masked_actions),
+            "actions_real": dict(self.last_actions),
+            "symbols_real": list(real_symbols),
+            "symbols_llm": list(llm_symbols),
+            "symbol_map": symbol_map,
+            "mask_symbols": bool(self.mask_symbols),
+            "use_memory": bool(self.use_memory),
+            "observation": to_jsonable(observation),
+            "info_before": {
+                k: to_jsonable(info[k])
+                for k in (
+                    "timestamp",
+                    "equity",
+                    "cash",
+                    "shares",
+                    "prices",
+                    "price",
+                    "weights",
+                    "symbols",
+                    "feature_names",
+                )
+                if k in info
+            },
+            "target_weights": to_jsonable(weights),
+        }
+        return weights
 
     # ----------------------------------------------------------------- internals
 

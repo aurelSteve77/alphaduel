@@ -26,9 +26,14 @@ def _sidebar_status() -> None:
     if not params:
         return
     universe = "Multi-asset" if params["mode"] == "multi_asset" else "Single asset"
+    symbols = list(params.get("symbols") or [])
     st.sidebar.divider()
     st.sidebar.caption("Current experiment")
     st.sidebar.write(f"**{universe}** · {len(params['agent_names'])} agents")
+    if symbols:
+        st.sidebar.caption(", ".join(symbols))
+    if params.get("start_date") and params.get("end_date"):
+        st.sidebar.caption(f"{params['start_date']} → {params['end_date']}")
     st.sidebar.caption(f"{params['episode_length']}d episodes · seed {params['seed']}")
 
 

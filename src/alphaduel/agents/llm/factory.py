@@ -8,6 +8,9 @@ Instantiate models here (or in notebooks/scripts), then pass the object into
     llm = LLMHandler.create("qwen3.5:2b", provider="ollama", temperature=0.0)
     llm = LLMHandler.create("gpt-5.4-mini", provider="openai", temperature=0.0)
     llm = LLMHandler.create(
+        "claude-haiku-4-5-20251001", provider="anthropic", temperature=0.0
+    )
+    llm = LLMHandler.create(
         "meta/meta-llama-3-8b-instruct", provider="replicate", temperature=0.0
     )
     agent = VanillaLLMAgent(llm=llm)
@@ -17,12 +20,13 @@ from __future__ import annotations
 
 from typing import Any
 
-SUPPORTED_PROVIDERS = ("ollama", "openai", "replicate")
+SUPPORTED_PROVIDERS = ("ollama", "openai", "anthropic", "replicate")
 
 # Sensible defaults shown in the dashboard when switching providers.
 DEFAULT_MODELS: dict[str, str] = {
     "ollama": "qwen3.5:2b",
     "openai": "gpt-5.4-mini",
+    "anthropic": "claude-haiku-4-5-20251001",
     "replicate": "meta/meta-llama-3-8b-instruct",
 }
 
@@ -51,11 +55,13 @@ class LLMHandler:
             Model identifier.
             - Ollama: e.g. ``\"qwen3.5:2b\"``
             - OpenAI: e.g. ``\"gpt-5.4-mini\"`` / ``\"gpt-4o-mini\"``
+            - Anthropic: e.g. ``\"claude-haiku-4-5-20251001\"`` /
+              ``\"claude-sonnet-4-5\"``
             - Replicate: e.g. ``\"meta/meta-llama-3-8b-instruct\"`` or
               ``\"owner/name:version\"``
         provider:
-            ``\"ollama\"``, ``\"openai\"`` (``langchain-openai`` / ChatOpenAI),
-            or ``\"replicate\"`` (``langchain-replicate`` / ChatReplicate).
+            ``\"ollama\"``, ``\"openai\"`` (ChatOpenAI), ``\"anthropic\"``
+            (ChatAnthropic), or ``\"replicate\"`` (ChatReplicate).
         temperature:
             Sampling temperature. For Replicate this is forwarded via
             ``model_kwargs`` (Replicate OpenAPI inputs).
@@ -65,7 +71,7 @@ class LLMHandler:
         **kwargs:
             Extra provider-specific kwargs
             (``base_url``, ``api_key``, ``replicate_api_token``, ``model_kwargs``,
-            ``reasoning_effort``, …).
+            ``reasoning_effort``, ``max_tokens``, ``timeout``, …).
         """
         provider = (provider or "ollama").lower().strip()
         if not name or not str(name).strip():
@@ -81,6 +87,13 @@ class LLMHandler:
             )
         if provider == "openai":
             return cls._create_openai(
+                str(name).strip(),
+                temperature=temperature,
+                **kwargs,
+            )
+        if provider == "anthropic":
+            kwargs.pop("reasoning_effort", None)
+            return cls._create_anthropic(
                 str(name).strip(),
                 temperature=temperature,
                 **kwargs,
@@ -154,6 +167,34 @@ class LLMHandler:
         return ChatOpenAI(**init)
 
     @staticmethod
+    def _create_anthropic(name: str, *, temperature: float, **kwargs: Any) -> Any:
+        """Build :class:`langchain_anthropic.ChatAnthropic`.
+
+        Auth: set ``ANTHROPIC_API_KEY`` in the environment / ``.env``, or pass
+        ``api_key=...``. See https://docs.langchain.com/oss/python/integrations/chat/anthropic
+        """
+        try:
+            from langchain_anthropic import ChatAnthropic
+        except ImportError as exc:
+            raise ImportError(
+                "Anthropic chat models require the `llm` extra: "
+                "`uv sync --extra llm` (langchain-anthropic)."
+            ) from exc
+
+        api_key = kwargs.pop("api_key", None)
+        if api_key is None:
+            api_key = kwargs.pop("anthropic_api_key", None)
+
+        init: dict[str, Any] = {
+            "model": name,
+            "temperature": temperature,
+        }
+        if api_key is not None:
+            init["api_key"] = api_key
+        init.update(kwargs)
+        return ChatAnthropic(**init)
+
+    @staticmethod
     def _create_replicate(name: str, *, temperature: float, **kwargs: Any) -> Any:
         """Build :class:`langchain_replicate.ChatReplicate`.
 
@@ -221,6 +262,13 @@ def _inject_secrets(cfg: dict[str, Any]) -> None:
     elif provider == "openai" and not cfg.get("api_key") and not cfg.get("openai_api_key"):
         if secrets.openai_api_key:
             cfg["api_key"] = secrets.openai_api_key
+    elif (
+        provider == "anthropic"
+        and not cfg.get("api_key")
+        and not cfg.get("anthropic_api_key")
+    ):
+        if secrets.anthropic_api_key:
+            cfg["api_key"] = secrets.anthropic_api_key
 
 
 def resolve_llm(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
@@ -249,13 +297,16 @@ def resolve_llm(params: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
         "reasoning",
         "api_key",
         "openai_api_key",
+        "anthropic_api_key",
         "replicate_api_token",
         "streaming",
         "model_kwargs",
         "max_retries",
         "timeout",
+        "max_tokens",
         "reasoning_effort",
         "max_completion_tokens",
+        "inference_geo",
     ):
         if key in out and key not in cfg:
             cfg[key] = out.pop(key)

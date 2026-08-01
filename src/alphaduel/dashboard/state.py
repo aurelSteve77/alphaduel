@@ -8,6 +8,7 @@ from pathlib import Path
 import streamlit as st
 
 from alphaduel.dashboard import engine
+from alphaduel.dashboard import real_data
 
 _PRESET_PATH = Path(".alphaduel") / "presets.json"
 
@@ -24,12 +25,27 @@ def ensure_params() -> dict:
         params.pop("vol", None)
         for key, value in engine.default_llm_params().items():
             params.setdefault(key, value)
+        if "symbols" not in params or not params["symbols"]:
+            params["symbols"] = engine.default_symbols(
+                params.get("mode", "multi_asset"),
+                int(params.get("n_assets", 4)),
+            )
+        else:
+            params["symbols"] = tuple(str(s).upper() for s in params["symbols"])
+        params["n_assets"] = len(params["symbols"])
+        if not params.get("start_date") or not params.get("end_date"):
+            start, end = real_data.default_date_range(params.get("mode", "multi_asset"))
+            params.setdefault("start_date", start)
+            params.setdefault("end_date", end)
+        params.setdefault("limit_n_steps", True)
     return st.session_state["params"]
 
 
 @st.cache_data(show_spinner="Running benchmark (LLM agents call Ollama when selected)...")
 def _run(params: dict) -> engine.BenchmarkResult:
-    return engine.run_benchmark(**params)
+    # Drop UI-only keys that are not run_benchmark kwargs.
+    kwargs = {k: v for k, v in params.items() if k != "limit_n_steps"}
+    return engine.run_benchmark(**kwargs)
 
 
 def get_result() -> engine.BenchmarkResult | None:
@@ -47,6 +63,20 @@ def _coerce(params: dict) -> dict:
     params = dict(params)
     if "agent_names" in params:
         params["agent_names"] = tuple(params["agent_names"])
+    if "symbols" in params and params["symbols"] is not None:
+        params["symbols"] = tuple(str(s).upper() for s in params["symbols"])
+        params["n_assets"] = len(params["symbols"])
+    else:
+        params["symbols"] = engine.default_symbols(
+            params.get("mode", "multi_asset"),
+            int(params.get("n_assets", 4)),
+        )
+        params["n_assets"] = len(params["symbols"])
+    if not params.get("start_date") or not params.get("end_date"):
+        start, end = real_data.default_date_range(params.get("mode", "multi_asset"))
+        params.setdefault("start_date", start)
+        params.setdefault("end_date", end)
+    params.setdefault("limit_n_steps", True)
     params.setdefault("use_mock", False)
     params.pop("drift", None)
     params.pop("vol", None)
@@ -61,6 +91,7 @@ def _builtin_presets() -> dict[str, dict]:
     momentum.update(
         mode="single_asset",
         agent_names=tuple(engine.baseline_agents("single_asset")),
+        symbols=engine.default_symbols("single_asset"),
         n_assets=1,
         episode_length=90,
     )

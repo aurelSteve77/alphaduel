@@ -27,18 +27,23 @@ def build_llm_graph(llm: Any):
 
     def call_model(state: LLMGraphState) -> dict:
         response = llm.invoke(state["messages"])
-        content = getattr(response, "content", None)
-        if content is None:
-            content = str(response)
-        elif isinstance(content, list):
-            # Some chat models return content blocks.
-            parts = []
-            for block in content:
-                if isinstance(block, dict) and "text" in block:
-                    parts.append(str(block["text"]))
-                else:
-                    parts.append(str(block))
-            content = "".join(parts)
+        # Prefer LangChain's unified `.text` (handles Anthropic content blocks).
+        text_prop = getattr(response, "text", None)
+        if isinstance(text_prop, str) and text_prop:
+            content = text_prop
+        else:
+            content = getattr(response, "content", None)
+            if content is None:
+                content = str(response)
+            elif isinstance(content, list):
+                # Some chat models return content blocks (e.g. Anthropic tool/thinking).
+                parts = []
+                for block in content:
+                    if isinstance(block, dict) and "text" in block:
+                        parts.append(str(block["text"]))
+                    else:
+                        parts.append(str(block))
+                content = "".join(parts)
         return {
             "messages": [AIMessage(content=content)],
             "raw_response": content,

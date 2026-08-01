@@ -186,8 +186,9 @@ def render() -> None:
     mode = params["mode"]
     st.info(
         f"Market setup comes from **Configure**: "
-        f"{'multi-asset' if mode == 'multi_asset' else 'single-asset'}, "
-        f"{params['n_assets']} assets, last {params['n_steps']} days, "
+        f"{'multi-asset' if mode == 'multi_asset' else 'single-asset'} "
+        f"({', '.join(params.get('symbols') or [])}), "
+        f"{params.get('start_date', '?')} → {params.get('end_date', '?')}, "
         f"cash ${params['initial_cash']:,.0f}."
     )
 
@@ -226,12 +227,27 @@ def render() -> None:
         help=f"Contestants (incl. LLM calls) run concurrently, capped at {engine.EVAL_MAX_WORKERS}.",
     )
 
+    save_llm_dataset = st.checkbox(
+        "Save LLM trajectories for SFT",
+        value=True,
+        key="eval_save_llm_dataset",
+        help=(
+            "For each LLM contestant, write per-episode JSON (messages, state, actions, "
+            "rewards) plus sft.jsonl under datasets/llm_sft/<run_id>/."
+        ),
+    )
+
     n_llm = sum(1 for c in roster if c["agent"] in engine.LLM_AGENTS)
     if n_llm:
         st.warning(
             f"{n_llm} LLM contestant(s) — up to {max_workers} run in parallel. "
             "Start with few episodes / short length while iterating."
         )
+        if save_llm_dataset:
+            st.caption(
+                "SFT datasets will be written to `datasets/llm_sft/<run_id>/` "
+                "(episode_XXX.json + sft.jsonl per LLM agent)."
+            )
 
     run = st.button(
         "Run evaluation",
@@ -284,7 +300,7 @@ def render() -> None:
                     for c in roster
                 ],
                 n_assets=int(params["n_assets"]),
-                n_steps=int(params["n_steps"]),
+                n_steps=int(params["n_steps"]) if params.get("n_steps") is not None else None,
                 episode_length=int(episode_length),
                 n_episodes=int(n_episodes),
                 seed=int(seed),
@@ -295,6 +311,10 @@ def render() -> None:
                 use_mock=bool(params.get("use_mock", False)),
                 progress=_on_progress,
                 max_workers=int(max_workers),
+                save_llm_dataset=bool(save_llm_dataset),
+                symbols=tuple(params.get("symbols") or ()),
+                start_date=params.get("start_date"),
+                end_date=params.get("end_date"),
             )
         except Exception as exc:  # noqa: BLE001 — surface LLM / data errors in the UI
             progress_bar.empty()
@@ -308,11 +328,14 @@ def render() -> None:
             "n_episodes": int(n_episodes),
             "episode_length": int(episode_length),
             "seed": int(seed),
+            "dataset_dir": result.dataset_dir,
             "roster": [
                 {"label": c["label"], "agent": c["agent"], "summary": _summary_row(c)}
                 for c in roster
             ],
         }
+        if result.dataset_dir:
+            st.success(f"LLM SFT dataset saved to `{result.dataset_dir}`")
         st.toast("Evaluation complete")
         st.rerun()
 
@@ -328,6 +351,8 @@ def render() -> None:
         st.caption(
             f"{meta['n_episodes']} episodes × {meta['episode_length']}d · seed {meta['seed']}"
         )
+        if meta.get("dataset_dir"):
+            st.info(f"LLM SFT dataset: `{meta['dataset_dir']}`")
         with st.expander("Roster used"):
             st.dataframe(
                 pd.DataFrame(meta["roster"]),

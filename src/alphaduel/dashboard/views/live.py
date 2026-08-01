@@ -185,7 +185,7 @@ def _decision(weights, symbols, mode, step_state, agent_name, decision_ph) -> No
             if parse_ok is False:
                 st.warning("Parse failed — held positions (do-nothing).")
             elif parse_ok is True:
-                st.caption("Parsed actions")
+                st.caption("Parsed actions (real tickers; LLM saw ASS1, ASS2, …)")
                 st.code(str(actions) if actions else "{}", language="json")
             thought = step_state.get("thought")
             if thought:

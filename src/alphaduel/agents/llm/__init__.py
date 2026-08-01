@@ -7,7 +7,8 @@ stores the rationale in ``last_thoughts``. Set ``last_parse_ok=False`` on parse
 failure (treated as hold).
 
 LEAKAGE NOTE: off-the-shelf LLMs may have memorized the future. Evaluate primarily on
-data after the model's training cutoff, and/or enable entity-masking. See SPEC §4.1.
+data after the model's training cutoff. VanillaLLMAgent masks tickers as ASS1, ASS2, …
+by default (``mask_symbols=True``). See SPEC §4.1.
 """
 
 from __future__ import annotations
@@ -20,15 +21,26 @@ from alphaduel.agents.llm.factory import (
     create_llm,
     resolve_llm,
 )
+from alphaduel.agents.llm.masking import SymbolMask, masked_symbol
+from alphaduel.agents.llm.trajectory import (
+    DEFAULT_DATASET_ROOT,
+    LLMDatasetWriter,
+    serialize_messages,
+)
 from alphaduel.agents.llm.vanilla import OffShelfLLMAgent, VanillaLLMAgent
 
 __all__ = [
+    "DEFAULT_DATASET_ROOT",
     "DEFAULT_MODELS",
     "DEFAULT_OPENAI_REASONING_EFFORT",
+    "LLMDatasetWriter",
     "LLMHandler",
     "OffShelfLLMAgent",
     "SUPPORTED_PROVIDERS",
+    "SymbolMask",
     "VanillaLLMAgent",
     "create_llm",
+    "masked_symbol",
     "resolve_llm",
+    "serialize_messages",
 ]

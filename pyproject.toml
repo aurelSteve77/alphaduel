@@ -33,9 +33,10 @@ rl = [
     "tensorboard>=2.16",
 ]
 llm = [
-    # Vanilla off-the-shelf agents (ChatOllama / ChatOpenAI / ChatReplicate + LangGraph).
+    # Vanilla off-the-shelf agents (ChatOllama / ChatOpenAI / ChatAnthropic / ChatReplicate + LangGraph).
     "langchain-ollama>=1.1.0",
     "langchain-openai>=0.3.0",
+    "langchain-anthropic>=0.3.0",
     "langchain-core>=1.5.3",
     "langgraph>=1.2.10",
     # Sourced from GitHub via [tool.uv.sources] (not on PyPI yet).

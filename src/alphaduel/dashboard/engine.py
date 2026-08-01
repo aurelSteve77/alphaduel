@@ -9,6 +9,7 @@ from __future__ import annotations
 import threading
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 import numpy as np
 
@@ -51,6 +52,7 @@ _DEFAULT_LLM = {
     "llm_max_memory_turns": 8,
     "llm_system_prompt_key": "base_agent_system",
     "llm_user_prompt_key": "base_agent_user",
+    "llm_mask_symbols": True,
 }
 
 
@@ -63,12 +65,28 @@ def baseline_agents(mode: str) -> list[str]:
     return [a for a in agents_for(mode) if a not in LLM_AGENTS]
 
 
+def default_symbols(mode: str, n_assets: int = 4) -> tuple[str, ...]:
+    """Default tickers for a dashboard mode (from YAML universe catalogs)."""
+    catalog = real_data.symbol_catalog()
+    if not catalog:
+        return ("AAPL", "MSFT", "GOOGL", "AMZN")[: max(1, n_assets)]
+    if mode == "single_asset":
+        return (catalog[0],)
+    n = max(2, min(int(n_assets), len(catalog)))
+    return tuple(catalog[:n])
+
+
 def default_params() -> dict:
     """Default experiment configuration shared by every dashboard page."""
+    symbols = default_symbols("multi_asset", 4)
+    start, end = real_data.default_date_range("multi_asset")
     return {
         "mode": "multi_asset",
         "agent_names": tuple(baseline_agents("multi_asset")),
-        "n_assets": 4,
+        "symbols": symbols,
+        "n_assets": len(symbols),
+        "start_date": start,
+        "end_date": end,
         "n_steps": 500,
         "episode_length": 120,
         "n_episodes": 20,
@@ -109,6 +127,7 @@ class BenchmarkResult:
     timestamps: list
     prices: np.ndarray              # (T, n_assets) replay-episode prices
     agents: dict[str, AgentRecord] = field(default_factory=dict)
+    dataset_dir: str | None = None  # LLM SFT traces root when saved during evaluate
 
 
 def _build_env(mode: str, panel, env_cfg: EnvConfig, seed: int):
@@ -139,6 +158,7 @@ def _llm_agent_params(params: dict) -> dict:
         "max_memory_turns": int(params.get("llm_max_memory_turns", 8)),
         "system_prompt_key": params.get("llm_system_prompt_key", "base_agent_system"),
         "user_prompt_key": params.get("llm_user_prompt_key", "base_agent_user"),
+        "mask_symbols": bool(params.get("llm_mask_symbols", True)),
     }
 
 
@@ -163,18 +183,45 @@ def get_panel(params: dict):
 
 
 def _panel_for(params: dict):
+    symbols = params.get("symbols")
+    if isinstance(symbols, str):
+        symbols = (symbols,)
+    elif symbols is not None:
+        symbols = tuple(str(s).strip().upper() for s in symbols if str(s).strip())
+        if not symbols:
+            symbols = None
+
     if params.get("use_mock"):
         drift = float(params.get("drift", 0.0004))
         vol = float(params.get("vol", 0.012))
         seed = int(params.get("seed", 7))
+        mock_steps = int(params["n_steps"] or 500)
         if params["mode"] == "multi_asset":
             panel = mock_data.make_multi_panel(
-                params["n_steps"], params["n_assets"], drift, vol, seed
+                mock_steps,
+                params.get("n_assets", 4),
+                drift,
+                vol,
+                seed,
+                symbols=symbols,
             )
             return panel, panel.symbols
-        panel = mock_data.make_single_panel(params["n_steps"], drift, vol, seed)
+        panel = mock_data.make_single_panel(
+            mock_steps,
+            drift,
+            vol,
+            seed,
+            symbol=(symbols[0] if symbols else "ASSET"),
+        )
         return panel, list(panel.symbols)
-    return real_data.load_panel(params["mode"], params["n_assets"], params["n_steps"])
+    return real_data.load_panel(
+        params["mode"],
+        params.get("n_assets", 4),
+        params["n_steps"],
+        symbols=symbols,
+        start=params.get("start_date"),
+        end=params.get("end_date"),
+    )
 
 
 def _env_config(params: dict) -> EnvConfig:
@@ -234,6 +281,7 @@ def stream_episode(env, agent, n_assets: int, seed: int | None = None):
     thoughts: list[str | None] = []
     parse_oks: list[bool | None] = []
     llm_actions: list[dict | None] = []
+    llm_traces: list[dict | None] = []
 
     def _state(done: bool, step: int) -> dict:
         return {
@@ -250,6 +298,7 @@ def stream_episode(env, agent, n_assets: int, seed: int | None = None):
             "thoughts": thoughts,
             "parse_oks": parse_oks,
             "llm_actions": llm_actions,
+            "llm_traces": llm_traces,
             "current_weights": weights[-1] if weights else _weights_from_info(info, n_assets),
             "cash": float(info["cash"]),
             "thought": thoughts[-1] if thoughts else None,
@@ -263,6 +312,7 @@ def stream_episode(env, agent, n_assets: int, seed: int | None = None):
     step = 0
     while not done:
         action = agent.act(obs, info)
+        trace = getattr(agent, "last_trace", None)
         obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
         step += 1
@@ -278,6 +328,19 @@ def stream_episode(env, agent, n_assets: int, seed: int | None = None):
         parse_oks.append(getattr(agent, "last_parse_ok", None))
         raw_actions = getattr(agent, "last_actions", None)
         llm_actions.append(dict(raw_actions) if raw_actions else None)
+        if isinstance(trace, dict):
+            step_trace = dict(trace)
+            step_trace["step"] = step
+            step_trace["timestamp"] = info.get("timestamp")
+            step_trace["reward"] = float(reward)
+            step_trace["fill_shares"] = int(info.get("fill_shares", 0))
+            step_trace["fill_cost"] = float(info.get("fill_cost", 0.0))
+            step_trace["equity_after"] = float(info.get("equity", 0.0))
+            step_trace["cash_after"] = float(info.get("cash", 0.0))
+            step_trace["weights_after"] = _weights_from_info(info, n_assets).tolist()
+            llm_traces.append(step_trace)
+        else:
+            llm_traces.append(None)
         yield _state(done, step)
 
 
@@ -291,13 +354,14 @@ def _run_episode(env, agent, n_assets: int, seed: int, on_step=None) -> dict:
         "timestamps": last["timestamps"],
         "equity": np.asarray(last["equity"]),
         "rewards": np.asarray(last["rewards"]),
-        "weights": np.vstack(last["weights_hist"]),
+        "weights": np.vstack(last["weights_hist"]) if last["weights_hist"] else np.zeros((0, n_assets)),
         "exposure": np.asarray(last["exposure"]),
         "fills": np.asarray(last["fills"], dtype=int),
         "costs": np.asarray(last["costs"]),
         "thoughts": last["thoughts"],
         "parse_oks": last["parse_oks"],
         "llm_actions": last["llm_actions"],
+        "llm_traces": last.get("llm_traces") or [],
         "prices": np.vstack(last["prices"]),
     }
 
@@ -306,7 +370,7 @@ def run_benchmark(
     mode: str,
     agent_names: tuple[str, ...],
     n_assets: int = 4,
-    n_steps: int = 500,
+    n_steps: int | None = 500,
     episode_length: int = 120,
     n_episodes: int = 20,
     seed: int = 7,
@@ -326,6 +390,10 @@ def run_benchmark(
     llm_max_memory_turns: int = 8,
     llm_system_prompt_key: str = "base_agent_system",
     llm_user_prompt_key: str = "base_agent_user",
+    llm_mask_symbols: bool = True,
+    symbols: tuple[str, ...] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> BenchmarkResult:
     """Run every named agent over a real (or mock) market and return per-step + aggregate results."""
     params = {
@@ -339,6 +407,10 @@ def run_benchmark(
         "llm_use_memory": llm_use_memory, "llm_max_memory_turns": llm_max_memory_turns,
         "llm_system_prompt_key": llm_system_prompt_key,
         "llm_user_prompt_key": llm_user_prompt_key,
+        "llm_mask_symbols": llm_mask_symbols,
+        "symbols": symbols,
+        "start_date": start_date,
+        "end_date": end_date,
     }
     panel, symbols = _panel_for(params)
     n = len(symbols)
@@ -509,8 +581,13 @@ def _evaluate_contestant(
     seed: int,
     n_trials: int,
     board: EvalProgressBoard | None = None,
+    dataset_root: Path | None = None,
+    run_id: str | None = None,
+    symbols: list[str] | None = None,
 ) -> tuple[str, AgentRecord, list, np.ndarray]:
     """Run one contestant on a private env (safe for thread-pool workers)."""
+    from alphaduel.agents.llm.trajectory import LLMDatasetWriter
+
     try:
         if board is not None:
             board.update(label, status="training" if agent_name in _GENERATIVE else "running",
@@ -522,6 +599,23 @@ def _evaluate_contestant(
             if board is not None:
                 board.update(label, status="training", detail="training GenPortfolio")
             agent.train(env)
+
+        writer = None
+        if (
+            dataset_root is not None
+            and run_id is not None
+            and agent_name in LLM_AGENTS
+        ):
+            writer = LLMDatasetWriter(
+                root=Path(dataset_root),
+                run_id=run_id,
+                agent_label=label,
+                agent_name=agent_name,
+                agent_params=agent_params,
+                mode=mode,
+                symbols=list(symbols or []),
+                seed=seed,
+            )
 
         episodes: list[dict] = []
         for j in range(n_episodes):
@@ -544,9 +638,24 @@ def _evaluate_contestant(
                         detail=f"episode {_ep}/{n_episodes} · step {step}/{episode_length}",
                     )
 
-            episodes.append(
-                _run_episode(env, agent, n_assets, seed + j, on_step=_on_step)
-            )
+            ep = _run_episode(env, agent, n_assets, seed + j, on_step=_on_step)
+            episodes.append(ep)
+
+            if writer is not None:
+                traces = [t for t in (ep.get("llm_traces") or []) if isinstance(t, dict)]
+                n_tx = int((ep["fills"] != 0).sum())
+                ep_metrics = compute_metrics(
+                    ep["equity"],
+                    n_transactions=n_tx,
+                    total_reward=float(ep["rewards"].sum()),
+                    n_trials=n_trials,
+                )
+                writer.write_episode(
+                    episode_index=j,
+                    episode_seed=seed + j,
+                    steps=traces,
+                    episode_metrics=ep_metrics,
+                )
 
         replay = episodes[0]
         episode_metrics = _per_episode_metrics(episodes, n_trials=n_trials)
@@ -586,7 +695,7 @@ def run_evaluation(
     mode: str,
     contestants: list[dict] | tuple[dict, ...],
     n_assets: int = 4,
-    n_steps: int = 500,
+    n_steps: int | None = 500,
     episode_length: int = 120,
     n_episodes: int = 20,
     seed: int = 7,
@@ -599,6 +708,11 @@ def run_evaluation(
     vol: float = 0.012,
     progress=None,
     max_workers: int = EVAL_MAX_WORKERS,
+    save_llm_dataset: bool = True,
+    dataset_root: str | Path | None = None,
+    symbols: list[str] | tuple[str, ...] | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
 ) -> BenchmarkResult:
     """Compare independently configured agents (including multiple LLM Vanilla instances).
 
@@ -612,9 +726,18 @@ def run_evaluation(
     Contestants run in a thread pool (default ``max_workers=3``, hard-capped) so several
     LLM agents can call providers concurrently. Each worker builds its own env.
 
+    When ``save_llm_dataset`` is True, every LLM contestant writes per-episode JSON traces
+    and an ``sft.jsonl`` under ``dataset_root/<run_id>/`` (default ``datasets/llm_sft``).
+
     ``progress(fraction, message, agents=...)`` is called from the main thread. ``agents`` is
     a list of per-contestant status dicts (episode, step, status).
     """
+    from alphaduel.agents.llm.trajectory import (
+        DEFAULT_DATASET_ROOT,
+        new_run_id,
+        write_run_manifest,
+    )
+
     if not contestants:
         raise ValueError("run_evaluation requires at least one contestant")
 
@@ -631,6 +754,9 @@ def run_evaluation(
         "use_mock": use_mock,
         "drift": drift,
         "vol": vol,
+        "symbols": symbols,
+        "start_date": start_date,
+        "end_date": end_date,
     }
     panel, symbols = _panel_for(params)
     n = len(symbols)
@@ -655,6 +781,27 @@ def run_evaluation(
         episode_length=episode_length,
     )
 
+    run_id = None
+    run_dataset_dir = None
+    has_llm = any(name in LLM_AGENTS for _, name, _ in specs)
+    if save_llm_dataset and has_llm:
+        run_id = new_run_id()
+        base = Path(dataset_root) if dataset_root else DEFAULT_DATASET_ROOT
+        run_dataset_dir = base / run_id
+        write_run_manifest(
+            run_dataset_dir,
+            run_id=run_id,
+            mode=mode,
+            symbols=symbols,
+            seed=seed,
+            n_episodes=n_episodes,
+            episode_length=episode_length,
+            contestants=[
+                {"label": label, "agent": agent_name, "params": agent_params}
+                for label, agent_name, agent_params in specs
+            ],
+        )
+
     def _emit(message: str | None = None) -> None:
         if progress is None:
             return
@@ -664,7 +811,13 @@ def run_evaluation(
             agents=board.snapshot(),
         )
 
-    result = BenchmarkResult(mode=mode, symbols=symbols, timestamps=[], prices=np.empty(0))
+    result = BenchmarkResult(
+        mode=mode,
+        symbols=symbols,
+        timestamps=[],
+        prices=np.empty(0),
+        dataset_dir=str(run_dataset_dir) if run_dataset_dir is not None else None,
+    )
     _emit(f"Starting {n_trials} contestants ({workers} workers)…")
 
     finished: dict[str, tuple[AgentRecord, list, np.ndarray]] = {}
@@ -684,6 +837,9 @@ def run_evaluation(
                 seed=seed,
                 n_trials=n_trials,
                 board=board,
+                dataset_root=run_dataset_dir,
+                run_id=run_id,
+                symbols=symbols,
             ): label
             for label, agent_name, agent_params in specs
         }

@@ -54,6 +54,6 @@ def render() -> None:
     m = params
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Universe", "Multi-asset" if m["mode"] == "multi_asset" else "Single asset")
-    k2.metric("Assets", m["n_assets"] if m["mode"] == "multi_asset" else 1)
+    k2.metric("Assets", ", ".join(m.get("symbols") or []) or m["n_assets"])
     k3.metric("Agents selected", len(m["agent_names"]))
     k4.metric("Episode length", f"{m['episode_length']}d")

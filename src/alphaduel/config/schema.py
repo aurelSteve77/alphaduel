@@ -22,6 +22,7 @@ class Secrets(BaseSettings):
     polygon_api_key: str | None = Field(default=None, alias="POLYGON_API_KEY")
     tiingo_api_key: str | None = Field(default=None, alias="TIINGO_API_KEY")
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+    anthropic_api_key: str | None = Field(default=None, alias="ANTHROPIC_API_KEY")
     hf_token: str | None = Field(default=None, alias="HF_TOKEN")
     replicate_api_token: str | None = Field(default=None, alias="REPLICATE_API_TOKEN")
     mlflow_tracking_uri: str = Field(default="file:./mlruns", alias="MLFLOW_TRACKING_URI")

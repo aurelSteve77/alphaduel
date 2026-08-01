@@ -43,7 +43,11 @@ def _features(close: np.ndarray) -> tuple[np.ndarray, list[str]]:
 
 
 def make_single_panel(
-    n_steps: int = 500, drift: float = 0.0004, vol: float = 0.012, seed: int = 7
+    n_steps: int = 500,
+    drift: float = 0.0004,
+    vol: float = 0.012,
+    seed: int = 7,
+    symbol: str = "ASSET",
 ) -> MarketPanel:
     open_, close = _price_paths(n_steps, 1, drift, vol, seed)
     feats, names = _features(close[:, 0])
@@ -54,6 +58,7 @@ def make_single_panel(
         close=close[:, 0],
         features=feats,
         feature_names=names,
+        symbol=str(symbol),
     )
 
 
@@ -63,8 +68,14 @@ def make_multi_panel(
     drift: float = 0.0004,
     vol: float = 0.012,
     seed: int = 7,
+    symbols: list[str] | tuple[str, ...] | None = None,
 ) -> MultiAssetPanel:
-    n_assets = min(n_assets, len(_MOCK_SYMBOLS))
+    if symbols:
+        syms = [str(s) for s in symbols]
+        n_assets = len(syms)
+    else:
+        n_assets = min(n_assets, len(_MOCK_SYMBOLS))
+        syms = _MOCK_SYMBOLS[:n_assets]
     open_, close = _price_paths(n_steps, n_assets, drift, vol, seed)
     per_asset = [_features(close[:, i]) for i in range(n_assets)]
     names = per_asset[0][1]
@@ -72,7 +83,7 @@ def make_multi_panel(
     ts = pd.date_range("2015-01-01", periods=n_steps, freq="B", tz="UTC")
     return MultiAssetPanel(
         timestamps=ts,
-        symbols=_MOCK_SYMBOLS[:n_assets],
+        symbols=syms,
         open=open_,
         close=close,
         features=features,
